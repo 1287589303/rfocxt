@@ -1,0 +1,26 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'rfocxt'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=rfocxt",
+                    "--package=rfocxt"
+                ],
+                "filter": {
+                    "name": "rfocxt",
+                    "kind": "bin"
+                }
+            },
+            "args": [
+                "--project",
+                "."
+            ],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}
