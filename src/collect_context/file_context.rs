@@ -94,13 +94,16 @@
 // }
 
 use quote::quote;
-use syn::{Expr, File, ImplItem, Item, ItemFn, ItemMod, ItemStruct, ItemTrait, ItemUse, Stmt};
+use syn::{
+    token::Impl, Expr, File, Item, ItemFn, ItemImpl, ItemMod, ItemStatic, ItemStruct, ItemTrait,
+    ItemUse, Stmt,
+};
 
-#[derive(Debug)]
-pub struct Application {
-    file_name: String,
-    function_name: String,
-}
+// #[derive(Debug)]
+// pub struct Application {
+//     file_name: String,
+//     function_name: String,
+// }
 
 #[derive(Debug)]
 pub struct UseItem {
@@ -113,19 +116,37 @@ pub struct ModItem {
 }
 
 #[derive(Debug)]
+pub struct StaticItem {
+    item: ItemStatic,
+}
+
+#[derive(Debug)]
+pub struct ImplItem {
+    item: ItemImpl,
+}
+
+#[derive(Debug)]
+pub struct TraitImplItem {
+    item: Impl,
+}
+
+#[derive(Debug)]
 pub struct StructItem {
     item: ItemStruct,
+    impls: Vec<ImplItem>,
+    traits: Vec<String>,
+    traits_impls: Vec<TraitImplItem>,
 }
 
 #[derive(Debug)]
 pub struct FunctionItem {
     function_name: String,
     item: ItemFn,
-    applications: Vec<Application>,
 }
 
 #[derive(Debug)]
 pub struct TraitItem {
+    trait_name: String,
     item: ItemTrait,
 }
 
@@ -134,8 +155,8 @@ pub struct RsFile {
     pub file_name: String,
     pub uses: Vec<UseItem>,
     pub mods: Vec<ModItem>,
+    pub statics: Vec<StaticItem>,
     pub structs: Vec<StructItem>,
-    pub impls: Vec<ImplItem>,
     pub functions: Vec<FunctionItem>,
     pub traits: Vec<TraitItem>,
 }
@@ -146,6 +167,7 @@ impl RsFile {
             file_name: String::new(),
             uses: Vec::new(),
             mods: Vec::new(),
+            statics: Vec::new(),
             structs: Vec::new(),
             functions: Vec::new(),
             traits: Vec::new(),
@@ -158,6 +180,7 @@ impl RsFile {
             file_name: file_name,
             uses: Vec::new(),
             mods: Vec::new(),
+            statics: Vec::new(),
             structs: Vec::new(),
             functions: Vec::new(),
             traits: Vec::new(),

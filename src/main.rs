@@ -47,9 +47,9 @@ fn main() {
             create_dir_all(parent);
         }
         let mut file = File::create(output_path).unwrap();
-        // file.write_all(format!("{:#?}", syntax).as_bytes());
+        file.write_all(format!("{:#?}", syntax).as_bytes());
         // file.write_all(syn_file.to_string().as_bytes());
-        file.write_all(format!("{:#?}", syn_file).as_bytes());
+        // file.write_all(format!("{:#?}", syn_file).as_bytes());
         // file_contexts.push(collect_file_context(
         //     rs_file.file_name().unwrap().to_string_lossy().to_string(),
         //     &syntax,
