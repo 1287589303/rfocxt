@@ -93,19 +93,18 @@
 //     a_file
 // }
 
+use clap::builder::Str;
 use quote::quote;
 use syn::{
-    File, Item, ItemConst, ItemEnum, ItemExternCrate, ItemFn, ItemForeignMod, ItemImpl, ItemMacro,
-    ItemMod, ItemStatic, ItemStruct, ItemTrait, ItemTraitAlias, ItemType, ItemUnion, ItemUse, Stmt,
-    Type,
+    visit::{self, Visit},
+    Expr, File, Item, ItemConst, ItemEnum, ItemExternCrate, ItemFn, ItemForeignMod, ItemImpl,
+    ItemMacro, ItemMod, ItemStatic, ItemStruct, ItemTrait, ItemTraitAlias, ItemType, ItemUnion,
+    ItemUse, Path, Stmt, Type,
 };
 
-#[derive(Debug, Clone)]
-pub enum Application {
-    Struct { struct_name: String },
-    Enum { enum_name: String },
-    Union { union_name: String },
-    Function { function_name: String },
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Application {
+    application_name: String,
 }
 
 #[derive(Debug, Clone)]
@@ -313,8 +312,20 @@ impl TraitItem {
     }
 }
 
+struct PathVisitor {
+    paths: Vec<String>,
+}
+
+impl<'ast> Visit<'ast> for PathVisitor {
+    fn visit_path(&mut self, node: &'ast Path) {
+        let path = node.segments.last().unwrap().ident.to_string();
+        self.paths.push(path);
+        visit::visit_path(self, node)
+    }
+}
+
 #[derive(Debug, Clone)]
-pub struct RsFile {
+pub struct SynFile {
     pub file_name: String,
     pub consts: Vec<ConstItem>,
     pub extern_crates: Vec<ExternCrateItem>,
@@ -332,9 +343,9 @@ pub struct RsFile {
     pub traits: Vec<TraitItem>,
 }
 
-impl RsFile {
+impl SynFile {
     pub fn new() -> Self {
-        RsFile {
+        SynFile {
             file_name: String::new(),
             consts: Vec::new(),
             extern_crates: Vec::new(),
@@ -354,80 +365,80 @@ impl RsFile {
     }
 
     pub fn new_with_file_name(file_name: String) -> Self {
-        let mut rs_file = RsFile::new();
-        rs_file.file_name = file_name;
-        rs_file
+        let mut syn_file = SynFile::new();
+        syn_file.file_name = file_name;
+        syn_file
     }
 
     pub fn from_syn_file(file_name: String, syntax: &File) -> Self {
-        let mut rs_file = RsFile::new_with_file_name(file_name);
+        let mut syn_file = SynFile::new_with_file_name(file_name);
         for item in syntax.items.clone() {
             match item {
                 Item::Const(item_const) => {
                     let mut const_item = ConstItem::new();
                     const_item.item = Some(item_const);
-                    rs_file.consts.push(const_item);
+                    syn_file.consts.push(const_item);
                 }
                 Item::ExternCrate(item_extern_crate) => {
                     let mut extern_crate_item = ExternCrateItem::new();
                     extern_crate_item.item = Some(item_extern_crate);
-                    rs_file.extern_crates.push(extern_crate_item);
+                    syn_file.extern_crates.push(extern_crate_item);
                 }
                 Item::ForeignMod(item_foreign_mod) => {
                     let mut foreign_mod_item = ForeignModItem::new();
                     foreign_mod_item.item = Some(item_foreign_mod);
-                    rs_file.foreign_mods.push(foreign_mod_item);
+                    syn_file.foreign_mods.push(foreign_mod_item);
                 }
                 Item::Macro(item_macro) => {
                     let mut macro_item = MacroItem::new();
                     macro_item.item = Some(item_macro);
-                    rs_file.macros.push(macro_item);
+                    syn_file.macros.push(macro_item);
                 }
                 Item::TraitAlias(item_trait_alias) => {
                     let mut trait_alias_item = TraitAliasItem::new();
                     trait_alias_item.item = Some(item_trait_alias);
-                    rs_file.trait_aliases.push(trait_alias_item);
+                    syn_file.trait_aliases.push(trait_alias_item);
                 }
                 Item::Use(item_use) => {
                     let mut use_item = UseItem::new();
                     use_item.item = Some(item_use);
-                    rs_file.uses.push(use_item);
+                    syn_file.uses.push(use_item);
                 }
                 Item::Mod(item_mod) => {
                     let mut mod_item = ModItem::new();
                     mod_item.item = Some(item_mod);
-                    rs_file.mods.push(mod_item);
+                    syn_file.mods.push(mod_item);
                 }
                 Item::Static(item_static) => {
                     let mut static_item = StaticItem::new();
                     static_item.item = Some(item_static);
-                    rs_file.statics.push(static_item);
+                    syn_file.statics.push(static_item);
                 }
                 Item::Type(item_type) => {
                     let mut type_item = TypeItem::new();
                     type_item.item = Some(item_type);
-                    rs_file.types.push(type_item);
+                    syn_file.types.push(type_item);
                 }
                 Item::Struct(item_struct) => {
                     let mut struct_item = StructItem::new();
                     let struct_name = item_struct.ident.to_string();
                     struct_item.struct_name = struct_name;
                     struct_item.item = Some(item_struct);
-                    rs_file.structs.push(struct_item);
+                    syn_file.structs.push(struct_item);
                 }
                 Item::Enum(item_enum) => {
                     let mut enum_item = EnumItem::new();
                     let enum_name = item_enum.ident.to_string();
                     enum_item.enum_name = enum_name;
                     enum_item.item = Some(item_enum);
-                    rs_file.enums.push(enum_item);
+                    syn_file.enums.push(enum_item);
                 }
                 Item::Union(item_union) => {
                     let mut union_item = UnionItem::new();
                     let union_name = item_union.ident.to_string();
                     union_item.union_name = union_name;
                     union_item.item = Some(item_union);
-                    rs_file.unions.push(union_item);
+                    syn_file.unions.push(union_item);
                 }
                 Item::Impl(item_impl) => {
                     let mut impl_item = ImplItem::new();
@@ -451,7 +462,7 @@ impl RsFile {
                     }
                     if trait_name == String::new() {
                         let mut b: bool = false;
-                        for struct_item in rs_file.structs.iter_mut() {
+                        for struct_item in syn_file.structs.iter_mut() {
                             if struct_item.struct_name == name {
                                 struct_item.impls.push(impl_item.clone());
                                 b = true;
@@ -459,7 +470,7 @@ impl RsFile {
                             }
                         }
                         if b == false {
-                            for enum_item in rs_file.enums.iter_mut() {
+                            for enum_item in syn_file.enums.iter_mut() {
                                 if enum_item.enum_name == name {
                                     enum_item.impls.push(impl_item.clone());
                                     b = true;
@@ -468,7 +479,7 @@ impl RsFile {
                             }
                         }
                         if b == false {
-                            for union_item in rs_file.unions.iter_mut() {
+                            for union_item in syn_file.unions.iter_mut() {
                                 if union_item.union_name == name {
                                     union_item.impls.push(impl_item.clone());
                                     break;
@@ -477,7 +488,7 @@ impl RsFile {
                         }
                     } else {
                         let mut b: bool = false;
-                        for struct_item in rs_file.structs.iter_mut() {
+                        for struct_item in syn_file.structs.iter_mut() {
                             if struct_item.struct_name == name {
                                 struct_item.traits.push(trait_name.clone());
                                 struct_item.traits_impls.push(impl_item.clone());
@@ -486,7 +497,7 @@ impl RsFile {
                             }
                         }
                         if b == false {
-                            for enum_item in rs_file.enums.iter_mut() {
+                            for enum_item in syn_file.enums.iter_mut() {
                                 if enum_item.enum_name == name {
                                     enum_item.traits.push(trait_name.clone());
                                     enum_item.traits_impls.push(impl_item.clone());
@@ -496,7 +507,7 @@ impl RsFile {
                             }
                         }
                         if b == false {
-                            for union_item in rs_file.unions.iter_mut() {
+                            for union_item in syn_file.unions.iter_mut() {
                                 if union_item.union_name == name {
                                     union_item.traits.push(trait_name.clone());
                                     union_item.traits_impls.push(impl_item.clone());
@@ -512,25 +523,84 @@ impl RsFile {
                     function_item.function_name = function_name;
                     function_item.item = Some(item_fn.clone());
                     let stmts = item_fn.block.stmts.clone();
+                    let mut visitor = PathVisitor { paths: Vec::new() };
                     for stmt in stmts {
-                        match stmt {
-                            Stmt::Expr(expr, _) => {}
-                            _ => {}
-                        }
+                        visitor.visit_stmt(&stmt);
                     }
-                    rs_file.functions.push(function_item);
+                    function_item
+                        .applications
+                        .extend(visitor.paths.iter().map(|path| Application {
+                            application_name: path.clone(),
+                        }));
+                    function_item.applications.sort();
+                    function_item.applications.dedup();
+                    println!("{:#?}", function_item.applications);
+                    // for stmt in stmts {
+                    //     match stmt {
+                    //         Stmt::Expr(expr, _) => match expr {
+                    //             Expr::Call(expr_call) => {
+                    //                 let func = *expr_call.func;
+                    //                 if let Expr::Path(expr_path) = func {
+                    //                     let path = expr_path.path;
+                    //                     let tokens = quote! {#path};
+                    //                     let callee = tokens.to_string();
+                    //                     let application = Application::Function {
+                    //                         function_name: callee,
+                    //                     };
+                    //                     function_item.applications.push(application);
+                    //                 }
+                    //             }
+                    //             _ => {}
+                    //         },
+                    //         _ => {}
+                    //     }
+                    // }
+                    syn_file.functions.push(function_item);
                 }
                 Item::Trait(item_trait) => {
                     let mut trait_item = TraitItem::new();
                     let trait_name: String = item_trait.ident.to_string();
                     trait_item.trait_name = trait_name;
                     trait_item.item = Some(item_trait);
-                    rs_file.traits.push(trait_item);
+                    syn_file.traits.push(trait_item);
                 }
                 _ => {}
             }
         }
-        rs_file
+        syn_file
+    }
+
+    pub fn delete_useless_application(&mut self, all_names: &Vec<String>) {
+        for function in self.functions.iter_mut() {
+            function
+                .applications
+                .retain(|application| all_names.contains(&application.application_name));
+        }
+    }
+
+    pub fn get_all_names(&self) -> Vec<String> {
+        let mut all_names: Vec<String> = Vec::new();
+        all_names.extend(
+            self.functions
+                .iter()
+                .map(|function_item| function_item.function_name.clone()),
+        );
+        all_names.extend(
+            self.structs
+                .iter()
+                .map(|struct_item| struct_item.struct_name.clone()),
+        );
+        all_names.extend(
+            self.enums
+                .iter()
+                .map(|enum_item| enum_item.enum_name.clone()),
+        );
+        all_names.extend(
+            self.unions
+                .iter()
+                .map(|union_item| union_item.union_name.clone()),
+        );
+        all_names
     }
 
     pub fn to_string(&self) -> String {
@@ -639,5 +709,70 @@ impl RsFile {
             #(#items)*
         };
         tokens.to_string()
+    }
+
+    pub fn get_trait(&self, trait_name: String) -> Option<ItemTrait> {
+        for trait_item in self.traits.iter() {
+            if trait_item.trait_name == trait_name {
+                return trait_item.item.clone();
+            }
+        }
+        None
+    }
+
+    pub fn get_items(&self, name: String) -> Vec<Item> {
+        let mut items: Vec<Item> = Vec::new();
+        let mut b = false;
+        for function_item in self.functions.iter() {
+            if function_item.function_name == name {
+                items.push(Item::Fn(function_item.item.clone().unwrap()));
+                b = true;
+                break;
+            }
+        }
+        if b == true {
+            return items;
+        }
+        for struct_item in self.structs.iter() {
+            if struct_item.struct_name == name {
+                items.push(Item::Struct(struct_item.item.clone().unwrap()));
+                items.extend(
+                    struct_item
+                        .impls
+                        .iter()
+                        .map(|impl_item| Item::Impl(impl_item.item.clone().unwrap())),
+                );
+                
+            }
+        }
+        return items;
+    }
+}
+
+pub struct SynFiles {
+    syn_files: Vec<SynFile>,
+    all_names: Vec<String>,
+}
+
+impl SynFiles {
+    pub fn new() -> Self {
+        SynFiles {
+            syn_files: Vec::new(),
+            all_names: Vec::new(),
+        }
+    }
+
+    pub fn add_syn_file(&mut self, syn_file: SynFile) {
+        self.syn_files.push(syn_file);
+    }
+
+    pub fn delete_useless_applications(&mut self) {
+        for syn_file in self.syn_files.iter() {
+            self.all_names
+                .extend(syn_file.get_all_names().iter().map(|name| name.clone()));
+        }
+        for syn_file in self.syn_files.iter_mut() {
+            syn_file.delete_useless_application(&self.all_names);
+        }
     }
 }
