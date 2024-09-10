@@ -56,7 +56,7 @@ fn main() {
         // ));
         file_contexts.push(syn_file);
     }
-    println!("{:#?}", file_contexts);
+    // println!("{:#?}", file_contexts);
     let mut all_rs_file = RsFile::new();
     for file_context in file_contexts {
         all_rs_file.uses.extend(file_context.uses);

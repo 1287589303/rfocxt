@@ -93,21 +93,20 @@
 //     a_file
 // }
 
-use std::ops::Deref;
-
 use quote::quote;
 use syn::{
-    token::{Enum, Impl, Mod},
-    Expr, File, Item, ItemConst, ItemEnum, ItemExternCrate, ItemFn, ItemForeignMod, ItemImpl,
-    ItemMacro, ItemMod, ItemStatic, ItemStruct, ItemTrait, ItemTraitAlias, ItemType, ItemUnion,
-    ItemUse, Stmt, Type,
+    File, Item, ItemConst, ItemEnum, ItemExternCrate, ItemFn, ItemForeignMod, ItemImpl, ItemMacro,
+    ItemMod, ItemStatic, ItemStruct, ItemTrait, ItemTraitAlias, ItemType, ItemUnion, ItemUse, Stmt,
+    Type,
 };
 
-// #[derive(Debug)]
-// pub struct Application {
-//     file_name: String,
-//     function_name: String,
-// }
+#[derive(Debug, Clone)]
+pub enum Application {
+    Struct { struct_name: String },
+    Enum { enum_name: String },
+    Union { union_name: String },
+    Function { function_name: String },
+}
 
 #[derive(Debug, Clone)]
 pub struct ConstItem {
@@ -286,6 +285,7 @@ impl UnionItem {
 pub struct FunctionItem {
     function_name: String,
     item: Option<ItemFn>,
+    applications: Vec<Application>,
 }
 
 impl FunctionItem {
@@ -293,6 +293,7 @@ impl FunctionItem {
         FunctionItem {
             function_name: String::new(),
             item: None,
+            applications: Vec::new(),
         }
     }
 }
@@ -509,7 +510,14 @@ impl RsFile {
                     let mut function_item = FunctionItem::new();
                     let function_name: String = item_fn.sig.ident.to_string();
                     function_item.function_name = function_name;
-                    function_item.item = Some(item_fn);
+                    function_item.item = Some(item_fn.clone());
+                    let stmts = item_fn.block.stmts.clone();
+                    for stmt in stmts {
+                        match stmt {
+                            Stmt::Expr(expr, _) => {}
+                            _ => {}
+                        }
+                    }
                     rs_file.functions.push(function_item);
                 }
                 Item::Trait(item_trait) => {
