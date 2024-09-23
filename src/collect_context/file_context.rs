@@ -318,7 +318,8 @@ struct PathVisitor {
 
 impl<'ast> Visit<'ast> for PathVisitor {
     fn visit_path(&mut self, node: &'ast Path) {
-        let path = node.segments.last().unwrap().ident.to_string();
+        // let path = node.segments.last().unwrap().ident.to_string();
+        let path = quote! {#node}.to_string();
         self.paths.push(path);
         visit::visit_path(self, node)
     }
@@ -370,7 +371,7 @@ impl SynFile {
         syn_file
     }
 
-    pub fn from_syn_file(file_name: String, syntax: &File) -> Self {
+    pub fn from_syntax(file_name: String, syntax: &File) -> Self {
         let mut syn_file = SynFile::new_with_file_name(file_name);
         for item in syntax.items.clone() {
             match item {
@@ -534,7 +535,7 @@ impl SynFile {
                         }));
                     function_item.applications.sort();
                     function_item.applications.dedup();
-                    println!("{:#?}", function_item.applications);
+                    // println!("{:#?}", function_item.applications);
                     // for stmt in stmts {
                     //     match stmt {
                     //         Stmt::Expr(expr, _) => match expr {
@@ -742,13 +743,13 @@ impl SynFile {
                         .iter()
                         .map(|impl_item| Item::Impl(impl_item.item.clone().unwrap())),
                 );
-                
             }
         }
         return items;
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct SynFiles {
     syn_files: Vec<SynFile>,
     all_names: Vec<String>,
@@ -773,6 +774,16 @@ impl SynFiles {
         }
         for syn_file in self.syn_files.iter_mut() {
             syn_file.delete_useless_application(&self.all_names);
+        }
+        // println!("{:#?}", self.all_names);
+    }
+
+    pub fn cout_applications(&self) {
+        for syn_file in self.syn_files.iter() {
+            for function in syn_file.functions.iter() {
+                println!("{:#?}", function.function_name);
+                println!("{:#?}", function.applications);
+            }
         }
     }
 }

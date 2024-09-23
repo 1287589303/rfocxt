@@ -34,30 +34,30 @@ fn main() {
         let code = read_to_string(&rs_file).unwrap();
         let syntax = parse_file(&code).unwrap();
         // println!("{:#?}", syntax);
-        let syn_file = SynFile::from_syn_file(
+        let syn_file = SynFile::from_syntax(
             rs_file.file_name().unwrap().to_string_lossy().to_string(),
             &syntax,
         );
-        let output_path = project_path.join("ast").join(format!(
-            "{}",
-            rs_file.file_name().unwrap().to_string_lossy()
-        ));
-        println!("{:#?}", output_path);
-        if let Some(parent) = Path::new(&output_path).parent() {
-            // 创建所有必要的父目录
-            create_dir_all(parent);
-        }
-        let mut file = File::create(output_path).unwrap();
-        file.write_all(format!("{:#?}", syntax).as_bytes());
-        // file.write_all(syn_file.to_string().as_bytes());
-        // file.write_all(format!("{:#?}", syn_file).as_bytes());
-        // file_contexts.push(collect_file_context(
-        //     rs_file.file_name().unwrap().to_string_lossy().to_string(),
-        //     &syntax,
+        // let output_path = project_path.join("ast").join(format!(
+        //     "{}",
+        //     rs_file.file_name().unwrap().to_string_lossy()
         // ));
+        // println!("{:#?}", output_path);
+        // if let Some(parent) = Path::new(&output_path).parent() {
+        //     // 创建所有必要的父目录
+        //     create_dir_all(parent);
+        // }
+        // let mut file = File::create(output_path).unwrap();
+        // file.write_all(format!("{:#?}", syntax).as_bytes());
+        // // file.write_all(syn_file.to_string().as_bytes());
+        // // file.write_all(format!("{:#?}", syn_file).as_bytes());
+        // // file_contexts.push(collect_file_context(
+        // //     rs_file.file_name().unwrap().to_string_lossy().to_string(),
+        // //     &syntax,
+        // // ));
         syn_files.add_syn_file(syn_file);
     }
-    // println!("{:#?}", file_contexts);
+    // println!("{:#?}", syn_files);
     // let mut all_rs_file = RsFile::new();
     // for file_context in file_contexts {
     //     all_rs_file.uses.extend(file_context.uses);
@@ -69,5 +69,8 @@ fn main() {
     // let output_path = project_path.join("ast").join("all.rs");
     // let mut file = File::create(output_path).unwrap();
     // file.write_all(all_rs_file.to_string().as_bytes());
+    syn_files.cout_applications();
     syn_files.delete_useless_applications();
+    // println!("{:#?}", syn_files);
+    syn_files.cout_applications();
 }
