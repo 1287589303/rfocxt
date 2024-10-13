@@ -1,0 +1,1 @@
+# [derive (Debug , Clone)] pub struct StaticItem { item : Option < ItemStatic > , } impl StaticItem { fn new () -> Self { StaticItem { item : None } } }

@@ -1,0 +1,1 @@
+# [derive (Debug , Clone)] pub struct FunctionItem { function_name : String , item : Option < MyItemFn > , applications : Vec < String > , } impl FunctionItem { fn new () -> Self { FunctionItem { function_name : String :: new () , item : None , applications : Vec :: new () , } } fn get_applications (& self) -> Vec < String > { self . applications . clone () } }

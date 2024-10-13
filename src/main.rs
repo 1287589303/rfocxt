@@ -25,32 +25,26 @@ struct Cli {
 fn main() {
     let cli = Cli::parse();
     let project_path = fs::canonicalize(PathBuf::from(cli.project.unwrap())).unwrap();
-    println!("project path {}", project_path.to_str().unwrap());
+    // println!("project path {}", project_path.to_str().unwrap());
     let rs_files: Vec<PathBuf> = find_rs_files(&project_path);
-    println!("{:#?}", rs_files);
+    // println!("{:#?}", rs_files);
     // let mut file_contexts: Vec<FileContext> = Vec::new();
     let mut syn_files = SynFiles::new();
     for rs_file in rs_files {
         let code = read_to_string(&rs_file).unwrap();
         let syntax = parse_file(&code).unwrap();
         // println!("{:#?}", syntax);
-        let syn_file = SynFile::from_syntax(
-            rs_file.file_name().unwrap().to_string_lossy().to_string(),
-            &syntax,
-        );
+        let syn_file = SynFile::from_syntax(rs_file.clone(), &syntax);
         // let output_path = project_path.join("ast").join(format!(
         //     "{}",
-        //     rs_file.file_name().unwrap().to_string_lossy()
+        //     rs_file.clone().file_name().unwrap().to_string_lossy()
         // ));
-        // println!("{:#?}", output_path);
-        // if let Some(parent) = Path::new(&output_path).parent() {
-        //     // 创建所有必要的父目录
-        //     create_dir_all(parent);
-        // }
-        // let mut file = File::create(output_path).unwrap();
+        // let file_path = format!("{}/ast.txt", output_path.to_string_lossy());
+        // fs::create_dir_all(output_path).unwrap();
+        // let mut file = File::create(file_path).unwrap();
         // file.write_all(format!("{:#?}", syntax).as_bytes());
-        // // file.write_all(syn_file.to_string().as_bytes());
-        // // file.write_all(format!("{:#?}", syn_file).as_bytes());
+        // file.write_all(syn_file.to_string().as_bytes());
+        // file.write_all(format!("{:#?}", syn_file).as_bytes());
         // // file_contexts.push(collect_file_context(
         // //     rs_file.file_name().unwrap().to_string_lossy().to_string(),
         // //     &syntax,
@@ -66,11 +60,21 @@ fn main() {
     //     all_rs_file.functions.extend(file_context.functions);
     //     all_rs_file.traits.extend(file_context.traits);
     // }
-    // let output_path = project_path.join("ast").join("all.rs");
-    // let mut file = File::create(output_path).unwrap();
-    // file.write_all(all_rs_file.to_string().as_bytes());
-    syn_files.cout_applications();
-    syn_files.delete_useless_applications();
-    // println!("{:#?}", syn_files);
-    syn_files.cout_applications();
+    // let output_path = project_path.join("ast");
+    // let file_path = output_path.join("all.rs");
+    // fs::create_dir_all(output_path);
+    // let mut file = File::create(file_path).unwrap();
+    // file.write_all(syn_files.to_string().as_bytes());
+    // syn_files.cout_applications();
+    // syn_files.delete_useless_applications();
+    // // println!("{:#?}", syn_files);
+    // syn_files.cout_applications();
+    syn_files.get_all_names();
+    syn_files.change_applications();
+    syn_files.get_all_context(project_path);
+    // let output_path = project_path.join("ast");
+    // let file_path = output_path.join("all.txt");
+    // fs::create_dir_all(output_path);
+    // let mut file = File::create(file_path).unwrap();
+    // file.write_all(format!("{:#?}", syn_files).as_bytes());
 }

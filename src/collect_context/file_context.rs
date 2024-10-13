@@ -1,111 +1,18 @@
-// use syn::{Item, UseTree};
+use std::{
+    fs,
+    io::{Seek, Write},
+    ops::Deref,
+    path::PathBuf,
+};
 
-// #[derive(Default, Debug)]
-// struct TypeContext {
-
-// }
-
-// #[derive(Default, Debug)]
-// struct ModContext {
-//     mod_name: String,
-// }
-
-// #[derive(Default, Debug)]
-// struct UseContext {
-//     is_group: bool,
-//     first_use_name: String,
-//     alias_name: String,
-//     second_use_names: Vec<UseContext>,
-// }
-
-// impl UseContext {
-//     fn recursion_construct(&mut self, use_tree: &UseTree) {
-//         match use_tree {
-//             UseTree::Path(path) => {
-//                 self.first_use_name = path.ident.to_string();
-//                 let mut second_use_context = UseContext::default();
-//                 second_use_context.recursion_construct(&path.tree);
-//                 self.second_use_names.push(second_use_context);
-//                 self.is_group = false;
-//             }
-//             UseTree::Name(name) => {
-//                 self.first_use_name = name.ident.to_string();
-//                 self.is_group = false;
-//             }
-//             UseTree::Rename(rename) => {
-//                 self.first_use_name = rename.ident.to_string();
-//                 self.alias_name = rename.rename.to_string();
-//                 self.is_group = false;
-//             }
-//             UseTree::Glob(_) => {
-//                 self.first_use_name = String::from("*");
-//                 self.is_group = false;
-//             }
-//             UseTree::Group(group) => {
-//                 self.is_group = true;
-//                 for item in &group.items {
-//                     let mut second_use_context = UseContext::default();
-//                     second_use_context.recursion_construct(item);
-//                     self.second_use_names.push(second_use_context);
-//                 }
-//             }
-//         }
-//     }
-// }
-
-// #[derive(Default, Debug)]
-// struct StructContext {
-//     strcut_name: String,
-//     fields: Vec<String>,
-// }
-
-// #[derive(Default, Debug)]
-// pub struct FileContext {
-//     file_name: String,
-//     mods: Vec<ModContext>,
-//     uses: Vec<UseContext>,
-//     structs: Vec<StructContext>,
-// }
-
-// pub fn collect_file_context(file_name: String, syntax: &syn::File) -> FileContext {
-//     let mut a_file = FileContext::default();
-//     a_file.file_name = file_name;
-//     for item in &syntax.items {
-//         match item {
-//             Item::Mod(item_mod) => {
-//                 let mut a_mod = ModContext::default();
-//                 a_mod.mod_name = item_mod.ident.to_string();
-//                 a_file.mods.push(a_mod);
-//             }
-//             Item::Use(item_use) => {
-//                 let mut a_use = UseContext::default();
-//                 a_use.recursion_construct(&item_use.tree);
-//                 a_file.uses.push(a_use);
-//             }
-//             Item::Struct(item_struct) => {
-//                 let mut a_struct = StructContext::default();
-//                 a_struct.strcut_name = item_struct.ident.to_string();
-//                 a_file.structs.push(a_struct);
-//             }
-//             _ => {}
-//         }
-//     }
-//     a_file
-// }
-
-use clap::builder::Str;
 use quote::quote;
 use syn::{
     visit::{self, Visit},
-    Expr, File, Item, ItemConst, ItemEnum, ItemExternCrate, ItemFn, ItemForeignMod, ItemImpl,
-    ItemMacro, ItemMod, ItemStatic, ItemStruct, ItemTrait, ItemTraitAlias, ItemType, ItemUnion,
-    ItemUse, Path, Stmt, Type,
+    Expr, File, ImplItem as SynImplItem, ImplItemConst, ImplItemFn, ImplItemType, Item, ItemConst,
+    ItemEnum, ItemExternCrate, ItemFn, ItemForeignMod, ItemImpl, ItemMacro, ItemMod, ItemStatic,
+    ItemStruct, ItemTrait, ItemTraitAlias, ItemType, ItemUnion, ItemUse, Path, Stmt,
+    TraitItem as SynTraitItem, TraitItemConst, TraitItemFn, TraitItemType, Type,
 };
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Application {
-    application_name: String,
-}
 
 #[derive(Debug, Clone)]
 pub struct ConstItem {
@@ -115,17 +22,6 @@ pub struct ConstItem {
 impl ConstItem {
     fn new() -> Self {
         ConstItem { item: None }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ExternCrateItem {
-    item: Option<ItemExternCrate>,
-}
-
-impl ExternCrateItem {
-    fn new() -> Self {
-        ExternCrateItem { item: None }
     }
 }
 
@@ -208,12 +104,62 @@ impl TypeItem {
 
 #[derive(Debug, Clone)]
 pub struct ImplItem {
-    item: Option<ItemImpl>,
+    pub item: Option<ItemImpl>,
+    pub types: Vec<ImplItemType>,
+    pub consts: Vec<ImplItemConst>,
+    pub functions: Vec<FunctionItem>,
 }
 
 impl ImplItem {
     fn new() -> Self {
-        ImplItem { item: None }
+        ImplItem {
+            item: None,
+            types: Vec::new(),
+            consts: Vec::new(),
+            functions: Vec::new(),
+        }
+    }
+
+    fn to_item_impl(&self) -> Item {
+        let mut item_impl = self.item.clone().unwrap();
+        item_impl.items.extend(
+            self.types
+                .iter()
+                .map(|type_item| SynImplItem::Type(type_item.clone())),
+        );
+        item_impl.items.extend(
+            self.consts
+                .iter()
+                .map(|const_impl| SynImplItem::Const(const_impl.clone())),
+        );
+        let mut functions: Vec<SynImplItem> = Vec::new();
+        for function in self.functions.iter() {
+            if let MyItemFn::ImplFn(item_function) = function.item.clone().unwrap() {
+                functions.push(SynImplItem::Fn(item_function));
+            }
+        }
+        item_impl.items.extend(functions);
+        Item::Impl(item_impl)
+    }
+}
+
+trait SEUGetApplications {
+    fn get_impls(&self) -> Vec<ImplItem>;
+    fn get_traits_impls(&self) -> Vec<ImplItem>;
+
+    fn get_applications(&self) -> Vec<String> {
+        let mut applications: Vec<String> = Vec::new();
+        for impl_item in self.get_impls().iter() {
+            for function_item in impl_item.functions.iter() {
+                applications.extend(function_item.applications.clone());
+            }
+        }
+        for trait_impl in self.get_traits_impls().iter() {
+            for function_item in trait_impl.functions.iter() {
+                applications.extend(function_item.applications.clone());
+            }
+        }
+        applications
     }
 }
 
@@ -238,6 +184,15 @@ impl StructItem {
     }
 }
 
+impl SEUGetApplications for StructItem {
+    fn get_impls(&self) -> Vec<ImplItem> {
+        self.impls.clone()
+    }
+    fn get_traits_impls(&self) -> Vec<ImplItem> {
+        self.traits_impls.clone()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct EnumItem {
     enum_name: String,
@@ -256,6 +211,15 @@ impl EnumItem {
             traits: Vec::new(),
             traits_impls: Vec::new(),
         }
+    }
+}
+
+impl SEUGetApplications for EnumItem {
+    fn get_impls(&self) -> Vec<ImplItem> {
+        self.impls.clone()
+    }
+    fn get_traits_impls(&self) -> Vec<ImplItem> {
+        self.traits_impls.clone()
     }
 }
 
@@ -280,11 +244,27 @@ impl UnionItem {
     }
 }
 
+impl SEUGetApplications for UnionItem {
+    fn get_impls(&self) -> Vec<ImplItem> {
+        self.impls.clone()
+    }
+    fn get_traits_impls(&self) -> Vec<ImplItem> {
+        self.traits_impls.clone()
+    }
+}
+
+#[derive(Debug, Clone)]
+enum MyItemFn {
+    Fn(ItemFn),
+    ImplFn(ImplItemFn),
+    TraitFn(TraitItemFn),
+}
+
 #[derive(Debug, Clone)]
 pub struct FunctionItem {
     function_name: String,
-    item: Option<ItemFn>,
-    applications: Vec<Application>,
+    item: Option<MyItemFn>,
+    applications: Vec<String>,
 }
 
 impl FunctionItem {
@@ -295,12 +275,19 @@ impl FunctionItem {
             applications: Vec::new(),
         }
     }
+
+    fn get_applications(&self) -> Vec<String> {
+        self.applications.clone()
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct TraitItem {
     trait_name: String,
     item: Option<ItemTrait>,
+    types: Vec<TraitItemType>,
+    consts: Vec<TraitItemConst>,
+    functions: Vec<FunctionItem>,
 }
 
 impl TraitItem {
@@ -308,9 +295,55 @@ impl TraitItem {
         TraitItem {
             trait_name: String::new(),
             item: None,
+            types: Vec::new(),
+            consts: Vec::new(),
+            functions: Vec::new(),
         }
     }
+
+    fn to_item_trait(&self) -> Item {
+        let mut item_impl = self.item.clone().unwrap();
+        item_impl.items.extend(
+            self.types
+                .iter()
+                .map(|type_item| SynTraitItem::Type(type_item.clone())),
+        );
+        item_impl.items.extend(
+            self.consts
+                .iter()
+                .map(|const_impl| SynTraitItem::Const(const_impl.clone())),
+        );
+        let mut functions: Vec<SynTraitItem> = Vec::new();
+        for function in self.functions.iter() {
+            if let MyItemFn::TraitFn(item_function) = function.item.clone().unwrap() {
+                functions.push(SynTraitItem::Fn(item_function));
+            }
+        }
+        item_impl.items.extend(functions);
+        Item::Trait(item_impl)
+    }
+
+    fn get_applications(&self) -> Vec<String> {
+        let mut applications: Vec<String> = Vec::new();
+        for function_item in self.functions.iter() {
+            applications.extend(function_item.applications.clone());
+        }
+        applications
+    }
 }
+
+// #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+// pub struct Application {
+//     application_name: String,
+// }
+
+// impl Application {
+//     fn new() -> Self {
+//         Application {
+//             application_name: String::new(),
+//         }
+//     }
+// }
 
 struct PathVisitor {
     paths: Vec<String>,
@@ -318,18 +351,32 @@ struct PathVisitor {
 
 impl<'ast> Visit<'ast> for PathVisitor {
     fn visit_path(&mut self, node: &'ast Path) {
-        // let path = node.segments.last().unwrap().ident.to_string();
-        let path = quote! {#node}.to_string();
-        self.paths.push(path);
+        self.paths.extend(
+            node.segments
+                .iter()
+                .map(|segment| segment.ident.to_string()),
+        );
         visit::visit_path(self, node)
     }
+}
+
+fn visit_stmts(stmts: Vec<Stmt>) -> Vec<String> {
+    let mut applications: Vec<String> = Vec::new();
+    let mut visitor = PathVisitor { paths: Vec::new() };
+    for stmt in stmts {
+        visitor.visit_stmt(&stmt);
+    }
+    applications.extend(visitor.paths.iter().map(|path| path.clone()));
+    applications.sort();
+    applications.dedup();
+    applications
 }
 
 #[derive(Debug, Clone)]
 pub struct SynFile {
     pub file_name: String,
+    pub file_path: PathBuf,
     pub consts: Vec<ConstItem>,
-    pub extern_crates: Vec<ExternCrateItem>,
     pub foreign_mods: Vec<ForeignModItem>,
     pub macros: Vec<MacroItem>,
     pub trait_aliases: Vec<TraitAliasItem>,
@@ -348,8 +395,8 @@ impl SynFile {
     pub fn new() -> Self {
         SynFile {
             file_name: String::new(),
+            file_path: PathBuf::new(),
             consts: Vec::new(),
-            extern_crates: Vec::new(),
             foreign_mods: Vec::new(),
             macros: Vec::new(),
             trait_aliases: Vec::new(),
@@ -365,25 +412,26 @@ impl SynFile {
         }
     }
 
-    pub fn new_with_file_name(file_name: String) -> Self {
+    pub fn new_with_file_path(file_path: PathBuf) -> Self {
         let mut syn_file = SynFile::new();
-        syn_file.file_name = file_name;
+        syn_file.file_path = file_path.clone();
+        syn_file.file_name = file_path
+            .clone()
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
         syn_file
     }
 
-    pub fn from_syntax(file_name: String, syntax: &File) -> Self {
-        let mut syn_file = SynFile::new_with_file_name(file_name);
+    pub fn from_syntax(file_path: PathBuf, syntax: &File) -> Self {
+        let mut syn_file = SynFile::new_with_file_path(file_path);
         for item in syntax.items.clone() {
             match item {
                 Item::Const(item_const) => {
                     let mut const_item = ConstItem::new();
                     const_item.item = Some(item_const);
                     syn_file.consts.push(const_item);
-                }
-                Item::ExternCrate(item_extern_crate) => {
-                    let mut extern_crate_item = ExternCrateItem::new();
-                    extern_crate_item.item = Some(item_extern_crate);
-                    syn_file.extern_crates.push(extern_crate_item);
                 }
                 Item::ForeignMod(item_foreign_mod) => {
                     let mut foreign_mod_item = ForeignModItem::new();
@@ -407,7 +455,7 @@ impl SynFile {
                 }
                 Item::Mod(item_mod) => {
                     let mut mod_item = ModItem::new();
-                    mod_item.item = Some(item_mod);
+                    mod_item.item = Some(item_mod.clone());
                     syn_file.mods.push(mod_item);
                 }
                 Item::Static(item_static) => {
@@ -443,7 +491,28 @@ impl SynFile {
                 }
                 Item::Impl(item_impl) => {
                     let mut impl_item = ImplItem::new();
-                    impl_item.item = Some(item_impl.clone());
+                    let mut empty_item_impl = item_impl.clone();
+                    empty_item_impl.items = Vec::new();
+                    impl_item.item = Some(empty_item_impl);
+                    for item in item_impl.items.iter() {
+                        match item {
+                            SynImplItem::Const(const_item) => {
+                                impl_item.consts.push(const_item.clone());
+                            }
+                            SynImplItem::Type(type_item) => {
+                                impl_item.types.push(type_item.clone());
+                            }
+                            SynImplItem::Fn(fn_item) => {
+                                let mut function_item = FunctionItem::new();
+                                function_item.function_name = fn_item.sig.ident.to_string();
+                                function_item.item = Some(MyItemFn::ImplFn(fn_item.clone()));
+                                function_item.applications =
+                                    visit_stmts(fn_item.block.stmts.clone());
+                                impl_item.functions.push(function_item);
+                            }
+                            _ => {}
+                        }
+                    }
                     let mut name = String::new();
                     let ty = *item_impl.self_ty;
                     if let Type::Path(ty_path) = ty {
@@ -522,47 +591,37 @@ impl SynFile {
                     let mut function_item = FunctionItem::new();
                     let function_name: String = item_fn.sig.ident.to_string();
                     function_item.function_name = function_name;
-                    function_item.item = Some(item_fn.clone());
-                    let stmts = item_fn.block.stmts.clone();
-                    let mut visitor = PathVisitor { paths: Vec::new() };
-                    for stmt in stmts {
-                        visitor.visit_stmt(&stmt);
-                    }
-                    function_item
-                        .applications
-                        .extend(visitor.paths.iter().map(|path| Application {
-                            application_name: path.clone(),
-                        }));
-                    function_item.applications.sort();
-                    function_item.applications.dedup();
-                    // println!("{:#?}", function_item.applications);
-                    // for stmt in stmts {
-                    //     match stmt {
-                    //         Stmt::Expr(expr, _) => match expr {
-                    //             Expr::Call(expr_call) => {
-                    //                 let func = *expr_call.func;
-                    //                 if let Expr::Path(expr_path) = func {
-                    //                     let path = expr_path.path;
-                    //                     let tokens = quote! {#path};
-                    //                     let callee = tokens.to_string();
-                    //                     let application = Application::Function {
-                    //                         function_name: callee,
-                    //                     };
-                    //                     function_item.applications.push(application);
-                    //                 }
-                    //             }
-                    //             _ => {}
-                    //         },
-                    //         _ => {}
-                    //     }
-                    // }
+                    function_item.item = Some(MyItemFn::Fn(item_fn.clone()));
+                    function_item.applications = visit_stmts(item_fn.block.stmts.clone());
                     syn_file.functions.push(function_item);
                 }
                 Item::Trait(item_trait) => {
                     let mut trait_item = TraitItem::new();
                     let trait_name: String = item_trait.ident.to_string();
                     trait_item.trait_name = trait_name;
-                    trait_item.item = Some(item_trait);
+                    let mut empty_item_trait = item_trait.clone();
+                    empty_item_trait.items = Vec::new();
+                    trait_item.item = Some(empty_item_trait);
+                    for item in item_trait.items.iter() {
+                        match item {
+                            SynTraitItem::Const(const_item) => {
+                                trait_item.consts.push(const_item.clone());
+                            }
+                            SynTraitItem::Type(type_item) => {
+                                trait_item.types.push(type_item.clone());
+                            }
+                            SynTraitItem::Fn(fn_item) => {
+                                let mut function_item = FunctionItem::new();
+                                function_item.function_name = fn_item.sig.ident.to_string();
+                                function_item.item = Some(MyItemFn::TraitFn(fn_item.clone()));
+                                if let Some(block) = &fn_item.default {
+                                    function_item.applications = visit_stmts(block.stmts.clone());
+                                }
+                                trait_item.functions.push(function_item);
+                            }
+                            _ => {}
+                        }
+                    }
                     syn_file.traits.push(trait_item);
                 }
                 _ => {}
@@ -571,37 +630,97 @@ impl SynFile {
         syn_file
     }
 
-    pub fn delete_useless_application(&mut self, all_names: &Vec<String>) {
-        for function in self.functions.iter_mut() {
-            function
+    pub fn change_applications(&mut self, all_names: &Vec<String>) {
+        for function_item in self.functions.iter_mut() {
+            function_item
                 .applications
-                .retain(|application| all_names.contains(&application.application_name));
+                .retain(|application| all_names.contains(application));
         }
-    }
-
-    pub fn get_all_names(&self) -> Vec<String> {
-        let mut all_names: Vec<String> = Vec::new();
-        all_names.extend(
-            self.functions
-                .iter()
-                .map(|function_item| function_item.function_name.clone()),
-        );
-        all_names.extend(
-            self.structs
-                .iter()
-                .map(|struct_item| struct_item.struct_name.clone()),
-        );
-        all_names.extend(
-            self.enums
-                .iter()
-                .map(|enum_item| enum_item.enum_name.clone()),
-        );
-        all_names.extend(
-            self.unions
-                .iter()
-                .map(|union_item| union_item.union_name.clone()),
-        );
-        all_names
+        for struct_item in self.structs.iter_mut() {
+            for impl_item in struct_item.impls.iter_mut() {
+                for function_item in impl_item.functions.iter_mut() {
+                    function_item
+                        .applications
+                        .retain(|application| all_names.contains(application));
+                    function_item.applications.extend(
+                        struct_item
+                            .traits
+                            .iter()
+                            .map(|trait_name| trait_name.clone()),
+                    );
+                }
+            }
+            for trait_impl_item in struct_item.traits_impls.iter_mut() {
+                for function_item in trait_impl_item.functions.iter_mut() {
+                    function_item
+                        .applications
+                        .retain(|application| all_names.contains(application));
+                    function_item.applications.extend(
+                        struct_item
+                            .traits
+                            .iter()
+                            .map(|trait_name| trait_name.clone()),
+                    );
+                }
+            }
+        }
+        for enum_item in self.enums.iter_mut() {
+            for impl_item in enum_item.impls.iter_mut() {
+                for function_item in impl_item.functions.iter_mut() {
+                    function_item
+                        .applications
+                        .retain(|application| all_names.contains(application));
+                    function_item
+                        .applications
+                        .extend(enum_item.traits.iter().map(|trait_name| trait_name.clone()));
+                }
+            }
+            for trait_impl_item in enum_item.traits_impls.iter_mut() {
+                for function_item in trait_impl_item.functions.iter_mut() {
+                    function_item
+                        .applications
+                        .retain(|application| all_names.contains(application));
+                    function_item
+                        .applications
+                        .extend(enum_item.traits.iter().map(|trait_name| trait_name.clone()));
+                }
+            }
+        }
+        for union_item in self.unions.iter_mut() {
+            for impl_item in union_item.impls.iter_mut() {
+                for function_item in impl_item.functions.iter_mut() {
+                    function_item
+                        .applications
+                        .retain(|application| all_names.contains(application));
+                    function_item.applications.extend(
+                        union_item
+                            .traits
+                            .iter()
+                            .map(|trait_name| trait_name.clone()),
+                    );
+                }
+            }
+            for trait_impl_item in union_item.traits_impls.iter_mut() {
+                for function_item in trait_impl_item.functions.iter_mut() {
+                    function_item
+                        .applications
+                        .retain(|application| all_names.contains(application));
+                    function_item.applications.extend(
+                        union_item
+                            .traits
+                            .iter()
+                            .map(|trait_name| trait_name.clone()),
+                    );
+                }
+            }
+        }
+        for trait_item in self.traits.iter_mut() {
+            for function_item in trait_item.functions.iter_mut() {
+                function_item
+                    .applications
+                    .retain(|application| all_names.contains(application));
+            }
+        }
     }
 
     pub fn to_string(&self) -> String {
@@ -620,11 +739,6 @@ impl SynFile {
             self.mods
                 .iter()
                 .map(|mod_item| Item::Mod(mod_item.item.clone().unwrap())),
-        );
-        items.extend(
-            self.extern_crates.iter().map(|extern_crate_item| {
-                Item::ExternCrate(extern_crate_item.item.clone().unwrap())
-            }),
         );
         items.extend(
             self.foreign_mods
@@ -654,7 +768,7 @@ impl SynFile {
         items.extend(
             self.traits
                 .iter()
-                .map(|trait_item| Item::Trait(trait_item.item.clone().unwrap())),
+                .map(|trait_item| trait_item.to_item_trait()),
         );
         for struct_item in &self.structs {
             items.push(Item::Struct(struct_item.item.clone().unwrap()));
@@ -662,13 +776,13 @@ impl SynFile {
                 struct_item
                     .impls
                     .iter()
-                    .map(|impl_item| Item::Impl(impl_item.item.clone().unwrap())),
+                    .map(|impl_item| impl_item.to_item_impl()),
             );
             items.extend(
                 struct_item
                     .traits_impls
                     .iter()
-                    .map(|trait_impl_item| Item::Impl(trait_impl_item.item.clone().unwrap())),
+                    .map(|trait_impl_item| trait_impl_item.to_item_impl()),
             );
         }
         for enum_item in &self.enums {
@@ -677,13 +791,13 @@ impl SynFile {
                 enum_item
                     .impls
                     .iter()
-                    .map(|impl_item| Item::Impl(impl_item.item.clone().unwrap())),
+                    .map(|impl_item| impl_item.to_item_impl()),
             );
             items.extend(
                 enum_item
                     .traits_impls
                     .iter()
-                    .map(|trait_impl_item| Item::Impl(trait_impl_item.item.clone().unwrap())),
+                    .map(|trait_impl_item| trait_impl_item.to_item_impl()),
             );
         }
         for union_item in &self.unions {
@@ -692,61 +806,38 @@ impl SynFile {
                 union_item
                     .impls
                     .iter()
-                    .map(|impl_item| Item::Impl(impl_item.item.clone().unwrap())),
+                    .map(|impl_item| impl_item.to_item_impl()),
             );
             items.extend(
                 union_item
                     .traits_impls
                     .iter()
-                    .map(|trait_impl_item| Item::Impl(trait_impl_item.item.clone().unwrap())),
+                    .map(|trait_impl_item| trait_impl_item.to_item_impl()),
             );
         }
+        let mut functions: Vec<ItemFn> = Vec::new();
+        for function in self.functions.iter() {
+            if let MyItemFn::Fn(item_fn) = function.item.clone().unwrap() {
+                functions.push(item_fn);
+            }
+        }
         items.extend(
-            self.functions
+            functions
                 .iter()
-                .map(|function_item| Item::Fn(function_item.item.clone().unwrap())),
+                .map(|function_item| Item::Fn(function_item.clone())),
         );
         let tokens = quote! {
             #(#items)*
         };
         tokens.to_string()
     }
+}
 
-    pub fn get_trait(&self, trait_name: String) -> Option<ItemTrait> {
-        for trait_item in self.traits.iter() {
-            if trait_item.trait_name == trait_name {
-                return trait_item.item.clone();
-            }
-        }
-        None
-    }
-
-    pub fn get_items(&self, name: String) -> Vec<Item> {
-        let mut items: Vec<Item> = Vec::new();
-        let mut b = false;
-        for function_item in self.functions.iter() {
-            if function_item.function_name == name {
-                items.push(Item::Fn(function_item.item.clone().unwrap()));
-                b = true;
-                break;
-            }
-        }
-        if b == true {
-            return items;
-        }
-        for struct_item in self.structs.iter() {
-            if struct_item.struct_name == name {
-                items.push(Item::Struct(struct_item.item.clone().unwrap()));
-                items.extend(
-                    struct_item
-                        .impls
-                        .iter()
-                        .map(|impl_item| Item::Impl(impl_item.item.clone().unwrap())),
-                );
-            }
-        }
-        return items;
-    }
+enum ContextItem {
+    Struct(StructItem),
+    Enum(EnumItem),
+    Union(UnionItem),
+    Trait(TraitItem),
 }
 
 #[derive(Debug, Clone)]
@@ -767,22 +858,462 @@ impl SynFiles {
         self.syn_files.push(syn_file);
     }
 
-    pub fn delete_useless_applications(&mut self) {
+    pub fn to_string(&self) -> String {
+        let mut re = String::new();
         for syn_file in self.syn_files.iter() {
-            self.all_names
-                .extend(syn_file.get_all_names().iter().map(|name| name.clone()));
+            re = re
+                + "//"
+                + syn_file.file_name.as_str()
+                + "\n"
+                + syn_file.to_string().as_str()
+                + "\n";
         }
-        for syn_file in self.syn_files.iter_mut() {
-            syn_file.delete_useless_application(&self.all_names);
-        }
-        // println!("{:#?}", self.all_names);
+        re
     }
 
-    pub fn cout_applications(&self) {
+    pub fn get_all_names(&mut self) {
         for syn_file in self.syn_files.iter() {
-            for function in syn_file.functions.iter() {
-                println!("{:#?}", function.function_name);
-                println!("{:#?}", function.applications);
+            self.all_names.extend(
+                syn_file
+                    .structs
+                    .iter()
+                    .map(|struct_item| struct_item.clone().struct_name),
+            );
+            self.all_names.extend(
+                syn_file
+                    .enums
+                    .iter()
+                    .map(|enum_item| enum_item.clone().enum_name),
+            );
+            self.all_names.extend(
+                syn_file
+                    .unions
+                    .iter()
+                    .map(|union_item| union_item.clone().union_name),
+            );
+            self.all_names.extend(
+                syn_file
+                    .functions
+                    .iter()
+                    .map(|function_item| function_item.clone().function_name),
+            );
+        }
+    }
+
+    pub fn change_applications(&mut self) {
+        for syn_file in self.syn_files.iter_mut() {
+            syn_file.change_applications(&self.all_names);
+        }
+    }
+
+    fn get_context_item(&self, application: String) -> Option<ContextItem> {
+        for syn_file in self.syn_files.iter() {
+            for struct_item in syn_file.structs.iter() {
+                if struct_item.struct_name == application {
+                    return Some(ContextItem::Struct(struct_item.clone()));
+                }
+            }
+            for enum_item in syn_file.enums.iter() {
+                if enum_item.enum_name == application {
+                    return Some(ContextItem::Enum(enum_item.clone()));
+                }
+            }
+            for union_item in syn_file.unions.iter() {
+                if union_item.union_name == application {
+                    return Some(ContextItem::Union(union_item.clone()));
+                }
+            }
+            for trait_item in syn_file.traits.iter() {
+                if trait_item.trait_name == application {
+                    return Some(ContextItem::Trait(trait_item.clone()));
+                }
+            }
+        }
+        None
+    }
+
+    pub fn get_all_context(&self, project_path: PathBuf) {
+        let output_path = project_path.join("context");
+        // println!("{:#?}", self.all_names);
+        for syn_file in self.syn_files.iter() {
+            let syn_file_path = output_path.clone().join(syn_file.clone().file_name);
+            for struct_item in syn_file.structs.iter() {
+                let struct_path = syn_file_path.clone().join(struct_item.clone().struct_name);
+                for impl_item in struct_item.impls.iter() {
+                    for function_item in impl_item.functions.iter() {
+                        let function_path = struct_path
+                            .clone()
+                            .join(function_item.clone().function_name);
+                        fs::create_dir_all(function_path.clone()).unwrap();
+                        let mut out_syn_file = SynFile::new();
+                        let mut remain_applications: Vec<String> = Vec::new();
+                        remain_applications = function_item.applications.clone();
+                        let mut already_applications: Vec<String> = Vec::new();
+                        already_applications.push(struct_item.struct_name.clone());
+                        out_syn_file.structs.push(struct_item.clone());
+                        while !remain_applications.is_empty() {
+                            let application = remain_applications.pop().unwrap();
+                            if !already_applications.contains(&application) {
+                                already_applications.push(application.clone());
+                                let context_item = self.get_context_item(application);
+                                if let Some(context_item) = context_item {
+                                    match context_item {
+                                        ContextItem::Enum(enum_item) => {
+                                            out_syn_file.enums.push(enum_item.clone());
+                                            remain_applications
+                                                .extend(enum_item.get_applications());
+                                        }
+                                        ContextItem::Union(union_item) => {
+                                            out_syn_file.unions.push(union_item.clone());
+                                            remain_applications
+                                                .extend(union_item.get_applications());
+                                        }
+                                        ContextItem::Struct(struct_item) => {
+                                            out_syn_file.structs.push(struct_item.clone());
+                                            remain_applications
+                                                .extend(struct_item.get_applications());
+                                        }
+                                        ContextItem::Trait(trait_item) => {
+                                            out_syn_file.traits.push(trait_item.clone());
+                                            remain_applications
+                                                .extend(trait_item.get_applications());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        let file_path = function_path.clone().join("context.rs");
+                        let mut file = fs::File::create(file_path).unwrap();
+                        file.write_all(out_syn_file.to_string().as_bytes()).unwrap();
+                        // file.write_all(
+                        //     (out_syn_file.to_string()
+                        //         + format!("\n/*{:#?}*/", out_syn_file).as_str())
+                        //     .as_bytes(),
+                        // )
+                        // .unwrap();
+                    }
+                }
+                for i in 0..struct_item.traits.len() {
+                    let trait_path = struct_path.join(struct_item.traits[i].clone());
+                    for function_item in struct_item.traits_impls[i].functions.iter() {
+                        let function_path =
+                            trait_path.clone().join(function_item.clone().function_name);
+                        fs::create_dir_all(function_path.clone()).unwrap();
+                        let mut out_syn_file = SynFile::new();
+                        let mut remain_applications: Vec<String> = Vec::new();
+                        remain_applications = function_item.applications.clone();
+                        let mut already_applications: Vec<String> = Vec::new();
+                        already_applications.push(struct_item.struct_name.clone());
+                        out_syn_file.structs.push(struct_item.clone());
+                        while !remain_applications.is_empty() {
+                            let application = remain_applications.pop().unwrap();
+                            if !already_applications.contains(&application) {
+                                already_applications.push(application.clone());
+                                let context_item = self.get_context_item(application);
+                                if let Some(context_item) = context_item {
+                                    match context_item {
+                                        ContextItem::Enum(enum_item) => {
+                                            out_syn_file.enums.push(enum_item.clone());
+                                            remain_applications
+                                                .extend(enum_item.get_applications());
+                                        }
+                                        ContextItem::Union(union_item) => {
+                                            out_syn_file.unions.push(union_item.clone());
+                                            remain_applications
+                                                .extend(union_item.get_applications());
+                                        }
+                                        ContextItem::Struct(struct_item) => {
+                                            out_syn_file.structs.push(struct_item.clone());
+                                            remain_applications
+                                                .extend(struct_item.get_applications());
+                                        }
+                                        ContextItem::Trait(trait_item) => {
+                                            out_syn_file.traits.push(trait_item.clone());
+                                            remain_applications
+                                                .extend(trait_item.get_applications());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        let file_path = function_path.clone().join("context.rs");
+                        let mut file = fs::File::create(file_path).unwrap();
+                        file.write_all(out_syn_file.to_string().as_bytes()).unwrap();
+                        // file.write_all(
+                        //     (out_syn_file.to_string()
+                        //         + format!("\n/*{:#?}*/", out_syn_file).as_str())
+                        //     .as_bytes(),
+                        // )
+                        // .unwrap();
+                    }
+                }
+            }
+            for enum_item in syn_file.enums.iter() {
+                let enum_path = syn_file_path.clone().join(enum_item.clone().enum_name);
+                for impl_item in enum_item.impls.iter() {
+                    for function_item in impl_item.functions.iter() {
+                        let function_path =
+                            enum_path.clone().join(function_item.clone().function_name);
+                        fs::create_dir_all(function_path.clone()).unwrap();
+                        let mut out_syn_file = SynFile::new();
+                        let mut remain_applications: Vec<String> = Vec::new();
+                        remain_applications = function_item.applications.clone();
+                        let mut already_applications: Vec<String> = Vec::new();
+                        already_applications.push(enum_item.enum_name.clone());
+                        out_syn_file.enums.push(enum_item.clone());
+                        while !remain_applications.is_empty() {
+                            let application = remain_applications.pop().unwrap();
+                            if !already_applications.contains(&application) {
+                                already_applications.push(application.clone());
+                                let context_item = self.get_context_item(application);
+                                if let Some(context_item) = context_item {
+                                    match context_item {
+                                        ContextItem::Enum(enum_item) => {
+                                            out_syn_file.enums.push(enum_item.clone());
+                                            remain_applications
+                                                .extend(enum_item.get_applications());
+                                        }
+                                        ContextItem::Union(union_item) => {
+                                            out_syn_file.unions.push(union_item.clone());
+                                            remain_applications
+                                                .extend(union_item.get_applications());
+                                        }
+                                        ContextItem::Struct(struct_item) => {
+                                            out_syn_file.structs.push(struct_item.clone());
+                                            remain_applications
+                                                .extend(struct_item.get_applications());
+                                        }
+                                        ContextItem::Trait(trait_item) => {
+                                            out_syn_file.traits.push(trait_item.clone());
+                                            remain_applications
+                                                .extend(trait_item.get_applications());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        let file_path = function_path.clone().join("context.rs");
+                        let mut file = fs::File::create(file_path).unwrap();
+                        file.write_all(out_syn_file.to_string().as_bytes()).unwrap();
+                        // file.write_all(
+                        //     (out_syn_file.to_string()
+                        //         + format!("\n/*{:#?}*/", out_syn_file).as_str())
+                        //     .as_bytes(),
+                        // )
+                        // .unwrap();
+                    }
+                }
+                for i in 0..enum_item.traits.len() {
+                    let trait_path = enum_path.join(enum_item.traits[i].clone());
+                    for function_item in enum_item.traits_impls[i].functions.iter() {
+                        let function_path =
+                            trait_path.clone().join(function_item.clone().function_name);
+                        fs::create_dir_all(function_path.clone()).unwrap();
+                        let mut out_syn_file = SynFile::new();
+                        let mut remain_applications: Vec<String> = Vec::new();
+                        remain_applications = function_item.applications.clone();
+                        let mut already_applications: Vec<String> = Vec::new();
+                        already_applications.push(enum_item.enum_name.clone());
+                        out_syn_file.enums.push(enum_item.clone());
+                        while !remain_applications.is_empty() {
+                            let application = remain_applications.pop().unwrap();
+                            if !already_applications.contains(&application) {
+                                already_applications.push(application.clone());
+                                let context_item = self.get_context_item(application);
+                                if let Some(context_item) = context_item {
+                                    match context_item {
+                                        ContextItem::Enum(enum_item) => {
+                                            out_syn_file.enums.push(enum_item.clone());
+                                            remain_applications
+                                                .extend(enum_item.get_applications());
+                                        }
+                                        ContextItem::Union(union_item) => {
+                                            out_syn_file.unions.push(union_item.clone());
+                                            remain_applications
+                                                .extend(union_item.get_applications());
+                                        }
+                                        ContextItem::Struct(struct_item) => {
+                                            out_syn_file.structs.push(struct_item.clone());
+                                            remain_applications
+                                                .extend(struct_item.get_applications());
+                                        }
+                                        ContextItem::Trait(trait_item) => {
+                                            out_syn_file.traits.push(trait_item.clone());
+                                            remain_applications
+                                                .extend(trait_item.get_applications());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        let file_path = function_path.clone().join("context.rs");
+                        let mut file = fs::File::create(file_path).unwrap();
+                        file.write_all(out_syn_file.to_string().as_bytes()).unwrap();
+                        // file.write_all(
+                        //     (out_syn_file.to_string()
+                        //         + format!("\n/*{:#?}*/", out_syn_file).as_str())
+                        //     .as_bytes(),
+                        // )
+                        // .unwrap();
+                    }
+                }
+            }
+            for union_item in syn_file.unions.iter() {
+                let union_path = syn_file_path.clone().join(union_item.clone().union_name);
+                for impl_item in union_item.impls.iter() {
+                    for function_item in impl_item.functions.iter() {
+                        let function_path =
+                            union_path.clone().join(function_item.clone().function_name);
+                        fs::create_dir_all(function_path.clone()).unwrap();
+                        let mut out_syn_file = SynFile::new();
+                        let mut remain_applications: Vec<String> = Vec::new();
+                        remain_applications = function_item.applications.clone();
+                        let mut already_applications: Vec<String> = Vec::new();
+                        already_applications.push(union_item.union_name.clone());
+                        out_syn_file.unions.push(union_item.clone());
+                        while !remain_applications.is_empty() {
+                            let application = remain_applications.pop().unwrap();
+                            if !already_applications.contains(&application) {
+                                already_applications.push(application.clone());
+                                let context_item = self.get_context_item(application);
+                                if let Some(context_item) = context_item {
+                                    match context_item {
+                                        ContextItem::Enum(enum_item) => {
+                                            out_syn_file.enums.push(enum_item.clone());
+                                            remain_applications
+                                                .extend(enum_item.get_applications());
+                                        }
+                                        ContextItem::Union(union_item) => {
+                                            out_syn_file.unions.push(union_item.clone());
+                                            remain_applications
+                                                .extend(union_item.get_applications());
+                                        }
+                                        ContextItem::Struct(struct_item) => {
+                                            out_syn_file.structs.push(struct_item.clone());
+                                            remain_applications
+                                                .extend(struct_item.get_applications());
+                                        }
+                                        ContextItem::Trait(trait_item) => {
+                                            out_syn_file.traits.push(trait_item.clone());
+                                            remain_applications
+                                                .extend(trait_item.get_applications());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        let file_path = function_path.clone().join("context.rs");
+                        let mut file = fs::File::create(file_path).unwrap();
+                        file.write_all(out_syn_file.to_string().as_bytes()).unwrap();
+                        // file.write_all(
+                        //     (out_syn_file.to_string()
+                        //         + format!("\n/*{:#?}*/", out_syn_file).as_str())
+                        //     .as_bytes(),
+                        // )
+                        // .unwrap();
+                    }
+                }
+                for i in 0..union_item.traits.len() {
+                    let trait_path = union_path.join(union_item.traits[i].clone());
+                    for function_item in union_item.traits_impls[i].functions.iter() {
+                        let function_path =
+                            trait_path.clone().join(function_item.clone().function_name);
+                        fs::create_dir_all(function_path.clone()).unwrap();
+                        let mut out_syn_file = SynFile::new();
+                        let mut remain_applications: Vec<String> = Vec::new();
+                        remain_applications = function_item.applications.clone();
+                        let mut already_applications: Vec<String> = Vec::new();
+                        already_applications.push(union_item.union_name.clone());
+                        out_syn_file.unions.push(union_item.clone());
+                        while !remain_applications.is_empty() {
+                            let application = remain_applications.pop().unwrap();
+                            if !already_applications.contains(&application) {
+                                already_applications.push(application.clone());
+                                let context_item = self.get_context_item(application);
+                                if let Some(context_item) = context_item {
+                                    match context_item {
+                                        ContextItem::Enum(enum_item) => {
+                                            out_syn_file.enums.push(enum_item.clone());
+                                            remain_applications
+                                                .extend(enum_item.get_applications());
+                                        }
+                                        ContextItem::Union(union_item) => {
+                                            out_syn_file.unions.push(union_item.clone());
+                                            remain_applications
+                                                .extend(union_item.get_applications());
+                                        }
+                                        ContextItem::Struct(struct_item) => {
+                                            out_syn_file.structs.push(struct_item.clone());
+                                            remain_applications
+                                                .extend(struct_item.get_applications());
+                                        }
+                                        ContextItem::Trait(trait_item) => {
+                                            out_syn_file.traits.push(trait_item.clone());
+                                            remain_applications
+                                                .extend(trait_item.get_applications());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        let file_path = function_path.clone().join("context.rs");
+                        let mut file = fs::File::create(file_path).unwrap();
+                        file.write_all(out_syn_file.to_string().as_bytes()).unwrap();
+                        // file.write_all(
+                        //     (out_syn_file.to_string()
+                        //         + format!("\n/*{:#?}*/", out_syn_file).as_str())
+                        //     .as_bytes(),
+                        // )
+                        // .unwrap();
+                    }
+                }
+            }
+            for function_item in syn_file.functions.iter() {
+                let function_path = syn_file_path
+                    .clone()
+                    .join(function_item.clone().function_name);
+                fs::create_dir_all(function_path.clone()).unwrap();
+                let mut out_syn_file = SynFile::new();
+                let mut remain_applications: Vec<String> = Vec::new();
+                remain_applications = function_item.applications.clone();
+                let mut already_applications: Vec<String> = Vec::new();
+                already_applications.push(function_item.function_name.clone());
+                out_syn_file.functions.push(function_item.clone());
+                while !remain_applications.is_empty() {
+                    let application = remain_applications.pop().unwrap();
+                    if !already_applications.contains(&application) {
+                        already_applications.push(application.clone());
+                        let context_item = self.get_context_item(application);
+                        if let Some(context_item) = context_item {
+                            match context_item {
+                                ContextItem::Enum(enum_item) => {
+                                    out_syn_file.enums.push(enum_item.clone());
+                                    remain_applications.extend(enum_item.get_applications());
+                                }
+                                ContextItem::Union(union_item) => {
+                                    out_syn_file.unions.push(union_item.clone());
+                                    remain_applications.extend(union_item.get_applications());
+                                }
+                                ContextItem::Struct(struct_item) => {
+                                    out_syn_file.structs.push(struct_item.clone());
+                                    remain_applications.extend(struct_item.get_applications());
+                                }
+                                ContextItem::Trait(trait_item) => {
+                                    out_syn_file.traits.push(trait_item.clone());
+                                    remain_applications.extend(trait_item.get_applications());
+                                }
+                            }
+                        }
+                    }
+                }
+                let file_path = function_path.clone().join("context.rs");
+                let mut file = fs::File::create(file_path).unwrap();
+                file.write_all(out_syn_file.to_string().as_bytes()).unwrap();
+                // file.write_all(
+                //     (out_syn_file.to_string() + format!("\n/*{:#?}*/", out_syn_file).as_str())
+                //         .as_bytes(),
+                // )
+                // .unwrap();
             }
         }
     }
