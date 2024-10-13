@@ -1,1 +1,0 @@
-# [derive (Debug , Clone)] pub struct MacroItem { item : Option < ItemMacro > , } impl MacroItem { fn new () -> Self { MacroItem { item : None } } }

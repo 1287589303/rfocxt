@@ -1,1 +1,0 @@
-# [derive (Debug , Clone)] pub struct TypeItem { item : Option < ItemType > , } impl TypeItem { fn new () -> Self { TypeItem { item : None } } }
