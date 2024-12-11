@@ -355,14 +355,22 @@ impl ModContext {
         }
     }
 
-    pub fn get_all_context(&self, output_path: &PathBuf, main_mod_context: &ModContext) {
+    pub fn get_all_simplified_item(&self, item_name: &String, syntax_context: &mut SyntaxContext) {
+        let one_syntax_context = self.syntax_context.get_simplified_item(item_name);
+        syntax_context.extend_with_other(&one_syntax_context);
+        for sub_mod in self.sub_mods.iter() {
+            sub_mod.get_all_simplified_item(item_name, syntax_context);
+        }
+    }
+
+    pub fn get_all_context(&self, output_path: &PathBuf, main_mod_contexts: &Vec<ModContext>) {
         self.syntax_context.get_context(
             output_path,
             &self.mod_info.get_mod_tree(),
-            main_mod_context,
+            main_mod_contexts,
         );
         for sub_mod in self.sub_mods.iter() {
-            sub_mod.get_all_context(output_path, main_mod_context);
+            sub_mod.get_all_context(output_path, main_mod_contexts);
         }
     }
 }

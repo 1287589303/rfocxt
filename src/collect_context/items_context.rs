@@ -1,9 +1,9 @@
 use std::process;
 
 use syn::{
-    ImplItemConst, ImplItemFn, ImplItemType, Item, ItemConst, ItemEnum, ItemFn, ItemImpl, ItemMod,
-    ItemStatic, ItemStruct, ItemTrait, ItemTraitAlias, ItemType, ItemUnion, ItemUse,
-    TraitItemConst, TraitItemFn, TraitItemType,
+    ImplItem as SynImplItem, ImplItemConst, ImplItemFn, ImplItemType, Item, ItemConst, ItemEnum,
+    ItemFn, ItemImpl, ItemMod, ItemStatic, ItemStruct, ItemTrait, ItemTraitAlias, ItemType,
+    ItemUnion, ItemUse, TraitItem as SynTraitItem, TraitItemConst, TraitItemFn, TraitItemType,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -194,13 +194,22 @@ pub enum MyItemFn {
     TraitFn(TraitItemFn),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct FunctionItem {
     function_name: String,
     complete_function_name_in_file: String,
     item: Option<MyItemFn>,
     items: Vec<Item>,
     application: Applications,
+}
+
+impl PartialEq for FunctionItem {
+    fn eq(&self, other: &Self) -> bool {
+        return self.function_name == other.function_name
+            && self.complete_function_name_in_file == other.complete_function_name_in_file
+            && self.items == other.items
+            && self.application == other.application;
+    }
 }
 
 impl FunctionItem {
@@ -272,7 +281,7 @@ impl FunctionItem {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct ImplItem {
     impl_num: i32,
     struct_name: String,
@@ -282,6 +291,18 @@ pub struct ImplItem {
     consts: Vec<ImplItemConst>,
     functions: Vec<FunctionItem>,
     applications: Applications,
+}
+
+impl PartialEq for ImplItem {
+    fn eq(&self, other: &Self) -> bool {
+        return self.impl_num == other.impl_num
+            && self.struct_name == other.struct_name
+            && self.trait_name == other.trait_name
+            && self.types == other.types
+            && self.consts == other.consts
+            && self.functions == other.functions
+            && self.applications == other.applications;
+    }
 }
 
 impl ImplItem {
@@ -482,7 +503,7 @@ impl UnionItem {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct TraitItem {
     trait_name: String,
     item: Option<ItemTrait>,
@@ -490,6 +511,16 @@ pub struct TraitItem {
     consts: Vec<TraitItemConst>,
     functions: Vec<FunctionItem>,
     applications: Applications,
+}
+
+impl PartialEq for TraitItem {
+    fn eq(&self, other: &Self) -> bool {
+        return self.trait_name == other.trait_name
+            && self.types == other.types
+            && self.consts == other.consts
+            && self.functions == other.functions
+            && self.applications == other.applications;
+    }
 }
 
 impl TraitItem {
@@ -546,5 +577,68 @@ impl TraitItem {
 
     pub fn get_item(&self) -> ItemTrait {
         return self.item.clone().unwrap();
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct UseTree {
+    use_name: String,
+    use_tree: String,
+    alias_name: String,
+}
+
+impl UseTree {
+    pub fn new(use_name: String, use_tree: String, alias_name: String) -> Self {
+        UseTree {
+            use_name: use_name,
+            use_tree: use_tree,
+            alias_name: alias_name,
+        }
+    }
+}
+
+pub trait ClearStmts {
+    fn clear_stmts(&mut self);
+}
+
+impl ClearStmts for ImplItem {
+    fn clear_stmts(&mut self) {
+        let items = self.item.as_mut().unwrap();
+        for item in items.items.iter_mut() {
+            match item {
+                SynImplItem::Fn(item_fn) => {
+                    item_fn.block.stmts = Vec::new();
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+impl ClearStmts for FunctionItem {
+    fn clear_stmts(&mut self) {
+        let item = self.item.as_mut().unwrap();
+        match item {
+            MyItemFn::Fn(item_fn) => {
+                item_fn.block.stmts = Vec::new();
+            }
+            _ => {}
+        }
+    }
+}
+
+impl ClearStmts for TraitItem {
+    fn clear_stmts(&mut self) {
+        let items = self.item.as_mut().unwrap();
+        for item in items.items.iter_mut() {
+            match item {
+                SynTraitItem::Fn(item_fn) => {
+                    if let Some(block) = item_fn.default.as_mut() {
+                        block.stmts = Vec::new();
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 }

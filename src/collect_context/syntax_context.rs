@@ -1,16 +1,18 @@
 use std::{fs::File, io::Write, path::PathBuf};
 
+use prettyplease::unparse;
 use quote::quote;
 use syn::{
+    parse2,
     visit::{self, Visit},
     Attribute, Expr, Fields, FnArg, GenericParam, Generics, Item, Lit, Meta, Path, ReturnType,
-    Stmt, Type, TypeParamBound,
+    Stmt, Type, TypeParamBound, UseTree as SynUseTree,
 };
 
 use super::{
     items_context::{
-        ConstItem, EnumItem, FunctionItem, ImplItem, ModItem, MyItemFn, StaticItem, StructItem,
-        TraitAliasItem, TraitItem, TypeItem, UnionItem, UseItem,
+        ClearStmts, ConstItem, EnumItem, FunctionItem, ImplItem, ModItem, MyItemFn, StaticItem,
+        StructItem, TraitAliasItem, TraitItem, TypeItem, UnionItem, UseItem, UseTree,
     },
     mod_context::ModContext,
 };
@@ -216,6 +218,65 @@ fn get_applications_for_fn(function: &MyItemFn, applications: &mut Vec<String>) 
     }
 }
 
+fn expand_use_tree(tree: &SynUseTree, expand_path: String, expanded_trees: &mut Vec<UseTree>) {
+    match tree {
+        SynUseTree::Path(use_path) => {
+            let mut path_str = String::new();
+            if expand_path != String::new() {
+                path_str = expand_path + "::" + &use_path.ident.to_string();
+            } else {
+                path_str = use_path.ident.to_string();
+            }
+            expand_use_tree(&use_path.tree, path_str, expanded_trees);
+        }
+        SynUseTree::Name(use_name) => {
+            let mut path_str = String::new();
+            if expand_path != String::new() {
+                path_str = expand_path + "::" + &use_name.ident.to_string();
+            } else {
+                path_str = use_name.ident.to_string();
+            }
+            let use_tree = UseTree::new(use_name.ident.to_string(), path_str, String::new());
+            expanded_trees.push(use_tree);
+        }
+        SynUseTree::Glob(use_glob) => {
+            let mut path_str = String::new();
+            if expand_path != String::new() {
+                path_str = expand_path + "::*";
+            } else {
+                path_str = "*".to_string();
+            }
+            let use_tree = UseTree::new("*".to_string(), path_str, String::new());
+            expanded_trees.push(use_tree);
+        }
+        SynUseTree::Rename(use_rename) => {
+            let mut path_str = String::new();
+            if expand_path != String::new() {
+                path_str = expand_path + "::" + &use_rename.ident.to_string();
+                let use_tree = UseTree::new(
+                    use_rename.ident.to_string(),
+                    path_str,
+                    use_rename.rename.to_string(),
+                );
+                expanded_trees.push(use_tree);
+            } else {
+                path_str = use_rename.ident.to_string();
+                let use_tree = UseTree::new(
+                    use_rename.ident.to_string(),
+                    path_str,
+                    use_rename.rename.to_string(),
+                );
+                expanded_trees.push(use_tree);
+            }
+        }
+        SynUseTree::Group(use_group) => {
+            for item in use_group.items.iter() {
+                expand_use_tree(item, expand_path.clone(), expanded_trees);
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SyntaxContext {
     consts: Vec<ConstItem>,
@@ -230,6 +291,7 @@ pub struct SyntaxContext {
     impls: Vec<ImplItem>,
     functions: Vec<FunctionItem>,
     traits: Vec<TraitItem>,
+    use_trees: Vec<UseTree>,
 }
 
 impl SyntaxContext {
@@ -247,12 +309,14 @@ impl SyntaxContext {
             impls: Vec::new(),
             functions: Vec::new(),
             traits: Vec::new(),
+            use_trees: Vec::new(),
         }
     }
 
     pub fn from_items(items: &Vec<Item>) -> Self {
         let mut syntax_context = SyntaxContext::new();
         let mut impl_num: i32 = 0;
+        let mut expanded_use_trees: Vec<UseTree> = Vec::new();
         for item in items.iter() {
             match item {
                 Item::Const(item_const) => {
@@ -276,6 +340,9 @@ impl SyntaxContext {
                     modified_item_use.attrs = delete_doc_attributes(&modified_item_use.attrs);
                     use_item.insert_item(&modified_item_use);
                     syntax_context.uses.push(use_item);
+                    let mut this_expanded_paths: Vec<UseTree> = Vec::new();
+                    expand_use_tree(&item_use.tree, String::new(), &mut this_expanded_paths);
+                    expanded_use_trees.extend(this_expanded_paths);
                 }
                 Item::Mod(item_mod) => {
                     let mut mod_item = ModItem::new();
@@ -370,8 +437,8 @@ impl SyntaxContext {
                     impl_item.change_impl_num(impl_num);
                     impl_num += 1;
                     let mut modified_item_impl = item_impl.clone();
+                    modified_item_impl.items = Vec::new();
                     modified_item_impl.attrs = delete_doc_attributes(&modified_item_impl.attrs);
-                    impl_item.insert_item(&modified_item_impl);
                     let mut applications: Vec<String> = Vec::new();
                     visit_generics(&item_impl.generics, &mut applications);
                     let mut struct_name = String::new();
@@ -403,12 +470,18 @@ impl SyntaxContext {
                                 let mut modified_item_const = item_const.clone();
                                 modified_item_const.attrs =
                                     delete_doc_attributes(&modified_item_const.attrs);
+                                modified_item_impl
+                                    .items
+                                    .push(SynImplItem::Const(modified_item_const.clone()));
                                 impl_item.insert_const(&modified_item_const);
                             }
                             SynImplItem::Type(item_type) => {
                                 let mut modified_item_type = item_type.clone();
                                 modified_item_type.attrs =
                                     delete_doc_attributes(&modified_item_type.attrs);
+                                modified_item_impl
+                                    .items
+                                    .push(SynImplItem::Type(modified_item_type.clone()));
                                 impl_item.insert_type(&modified_item_type);
                             }
                             SynImplItem::Fn(item_fn) => {
@@ -419,6 +492,9 @@ impl SyntaxContext {
                                 let mut modified_item_fn = item_fn.clone();
                                 modified_item_fn.attrs =
                                     delete_doc_attributes(&modified_item_fn.attrs);
+                                modified_item_impl
+                                    .items
+                                    .push(SynImplItem::Fn(modified_item_fn.clone()));
                                 let my_item_fn = MyItemFn::ImplFn(modified_item_fn);
                                 function_item.insert_item(&my_item_fn);
                                 let mut stmt_items: Vec<Item> = Vec::new();
@@ -439,6 +515,7 @@ impl SyntaxContext {
                             _ => {}
                         }
                     }
+                    impl_item.insert_item(&modified_item_impl);
                     syntax_context.impls.push(impl_item);
                 }
                 Item::Fn(item_fn) => {
@@ -466,7 +543,8 @@ impl SyntaxContext {
                     trait_item.insert_trait_name(&item_trait.ident.to_string());
                     let mut modified_item_trait = item_trait.clone();
                     modified_item_trait.attrs = delete_doc_attributes(&modified_item_trait.attrs);
-                    trait_item.insert_item(&modified_item_trait);
+                    // trait_item.insert_item(&modified_item_trait);
+                    modified_item_trait.items = Vec::new();
                     let mut applications: Vec<String> = Vec::new();
                     visit_generics(&item_trait.generics, &mut applications);
                     trait_item.insert_applications(&applications);
@@ -476,12 +554,18 @@ impl SyntaxContext {
                                 let mut modified_item_const = item_const.clone();
                                 modified_item_const.attrs =
                                     delete_doc_attributes(&modified_item_const.attrs);
+                                modified_item_trait
+                                    .items
+                                    .push(SynTraitItem::Const(modified_item_const.clone()));
                                 trait_item.insert_const(&modified_item_const);
                             }
                             SynTraitItem::Type(item_type) => {
                                 let mut modified_item_type = item_type.clone();
                                 modified_item_type.attrs =
                                     delete_doc_attributes(&modified_item_type.attrs);
+                                modified_item_trait
+                                    .items
+                                    .push(SynTraitItem::Type(modified_item_type.clone()));
                                 trait_item.insert_type(&modified_item_type);
                             }
                             SynTraitItem::Fn(item_fn) => {
@@ -495,6 +579,9 @@ impl SyntaxContext {
                                     let mut modified_item_fn = item_fn.clone();
                                     modified_item_fn.attrs =
                                         delete_doc_attributes(&modified_item_fn.attrs);
+                                    modified_item_trait
+                                        .items
+                                        .push(SynTraitItem::Fn(modified_item_fn.clone()));
                                     let my_item_fn = MyItemFn::TraitFn(modified_item_fn);
                                     function_item.insert_item(&my_item_fn);
                                     let mut stmt_items: Vec<Item> = Vec::new();
@@ -516,11 +603,13 @@ impl SyntaxContext {
                             _ => {}
                         }
                     }
+                    trait_item.insert_item(&modified_item_trait);
                     syntax_context.traits.push(trait_item);
                 }
                 _ => {}
             }
         }
+        syntax_context.use_trees = expanded_use_trees;
         syntax_context
     }
 
@@ -631,6 +720,57 @@ impl SyntaxContext {
         syntax_context
     }
 
+    pub fn get_simplified_item(&self, item_name: &String) -> SyntaxContext {
+        let mut syntax_context = SyntaxContext::new();
+        for struct_item in self.structs.iter() {
+            if struct_item.get_struct_name().eq(item_name) {
+                syntax_context.structs.push(struct_item.clone());
+            }
+        }
+        for enum_item in self.enums.iter() {
+            if enum_item.get_enum_name().eq(item_name) {
+                syntax_context.enums.push(enum_item.clone());
+            }
+        }
+        for union_item in self.unions.iter() {
+            if union_item.get_union_name().eq(item_name) {
+                syntax_context.unions.push(union_item.clone());
+            }
+        }
+        for impl_item in self.impls.iter() {
+            let struct_name = impl_item.get_struct_name();
+            let trait_name = impl_item.get_trait_name();
+            if let None = trait_name {
+                if struct_name.eq(item_name) {
+                    let mut simplified_impl_item = impl_item.clone();
+                    simplified_impl_item.clear_stmts();
+                    syntax_context.impls.push(simplified_impl_item);
+                }
+            } else {
+                if struct_name.eq(item_name) || trait_name.unwrap().eq(item_name) {
+                    let mut simplified_impl_item = impl_item.clone();
+                    simplified_impl_item.clear_stmts();
+                    syntax_context.impls.push(simplified_impl_item);
+                }
+            }
+        }
+        for function_item in self.functions.iter() {
+            if function_item.get_function_name().eq(item_name) {
+                let mut simplified_function_item = function_item.clone();
+                simplified_function_item.clear_stmts();
+                syntax_context.functions.push(simplified_function_item);
+            }
+        }
+        for trait_item in self.traits.iter() {
+            if trait_item.get_trait_name().eq(item_name) {
+                let mut simplified_trait_item = trait_item.clone();
+                simplified_trait_item.clear_stmts();
+                syntax_context.traits.push(simplified_trait_item);
+            }
+        }
+        syntax_context
+    }
+
     pub fn get_all_applications(&self) -> Vec<String> {
         let mut all_applications: Vec<String> = Vec::new();
         for struct_item in self.structs.iter() {
@@ -723,24 +863,38 @@ impl SyntaxContext {
         &self,
         output_path: &PathBuf,
         mod_tree: &String,
-        main_mod_context: &ModContext,
+        main_mod_contexts: &Vec<ModContext>,
     ) {
         for function_item in self.functions.iter() {
             let complete_function_name =
                 mod_tree.clone() + "::" + &function_item.get_complete_function_name_in_file();
             let mut remain_applications: Vec<String> = Vec::new();
             let mut already_applications: Vec<String> = Vec::new();
-            remain_applications.push(function_item.get_function_name());
             let mut syntax_context = SyntaxContext::new();
+            syntax_context.functions.push(function_item.clone());
+            already_applications.push(function_item.get_function_name());
+            remain_applications.extend(function_item.get_applications());
+            let size = remain_applications.len() as i32;
+            let mut i = 0;
             while !remain_applications.is_empty() {
-                let item_name = remain_applications.pop().unwrap();
+                let item_name = remain_applications.remove(0);
                 if !already_applications.contains(&item_name) {
                     already_applications.push(item_name.clone());
                     let mut named_syntax_context = SyntaxContext::new();
-                    main_mod_context.get_all_item(&item_name, &mut named_syntax_context);
+                    if i < size {
+                        for main_mod_context in main_mod_contexts.iter() {
+                            main_mod_context.get_all_item(&item_name, &mut named_syntax_context);
+                        }
+                    } else {
+                        for main_mod_context in main_mod_contexts.iter() {
+                            main_mod_context
+                                .get_all_simplified_item(&item_name, &mut named_syntax_context)
+                        }
+                    }
                     syntax_context.extend_with_other(&named_syntax_context);
                     remain_applications.extend(named_syntax_context.get_all_applications());
                 }
+                i = i + 1;
             }
             let rs_file_name = complete_function_name + ".rs";
             let output_file_path = output_path.join(rs_file_name);
@@ -760,16 +914,30 @@ impl SyntaxContext {
                 if let Some(trait_name) = trait_name {
                     remain_applications.push(trait_name);
                 }
+                remain_applications.extend(function_item.get_applications());
+                let size = remain_applications.len() as i32;
+                let mut i = 0;
                 let mut syntax_context = SyntaxContext::new();
                 while !remain_applications.is_empty() {
-                    let item_name = remain_applications.pop().unwrap();
+                    let item_name = remain_applications.remove(0);
                     if !already_applications.contains(&item_name) {
                         already_applications.push(item_name.clone());
                         let mut named_syntax_context = SyntaxContext::new();
-                        main_mod_context.get_all_item(&item_name, &mut named_syntax_context);
+                        if i < size {
+                            for main_mod_context in main_mod_contexts.iter() {
+                                main_mod_context
+                                    .get_all_item(&item_name, &mut named_syntax_context);
+                            }
+                        } else {
+                            for main_mod_context in main_mod_contexts.iter() {
+                                main_mod_context
+                                    .get_all_simplified_item(&item_name, &mut named_syntax_context)
+                            }
+                        }
                         syntax_context.extend_with_other(&named_syntax_context);
                         remain_applications.extend(named_syntax_context.get_all_applications());
                     }
+                    i = i + 1;
                 }
                 let rs_file_name = complete_function_name + ".rs";
                 let output_file_path = output_path.join(rs_file_name);
@@ -787,15 +955,29 @@ impl SyntaxContext {
                 let trait_name = trait_item.get_trait_name();
                 remain_applications.push(trait_name);
                 let mut syntax_context = SyntaxContext::new();
+                remain_applications.extend(function_item.get_applications());
+                let size = remain_applications.len() as i32;
+                let mut i = 0;
                 while !remain_applications.is_empty() {
-                    let item_name = remain_applications.pop().unwrap();
+                    let item_name = remain_applications.remove(0);
                     if !already_applications.contains(&item_name) {
                         already_applications.push(item_name.clone());
                         let mut named_syntax_context = SyntaxContext::new();
-                        main_mod_context.get_all_item(&item_name, &mut named_syntax_context);
+                        if i < size {
+                            for main_mod_context in main_mod_contexts.iter() {
+                                main_mod_context
+                                    .get_all_item(&item_name, &mut named_syntax_context);
+                            }
+                        } else {
+                            for main_mod_context in main_mod_contexts.iter() {
+                                main_mod_context
+                                    .get_all_simplified_item(&item_name, &mut named_syntax_context)
+                            }
+                        }
                         syntax_context.extend_with_other(&named_syntax_context);
                         remain_applications.extend(named_syntax_context.get_all_applications());
                     }
+                    i = i + 1;
                 }
                 let rs_file_name = complete_function_name + ".rs";
                 let output_file_path = output_path.join(rs_file_name);
@@ -869,6 +1051,8 @@ impl SyntaxContext {
                 .map(|function_item| Item::Fn(function_item.get_item())),
         );
         let tokens = quote! {#(#items)*};
-        tokens.to_string()
+        let syntax: syn::File = parse2(tokens).unwrap();
+        unparse(&syntax)
+        // tokens.to_string()
     }
 }
