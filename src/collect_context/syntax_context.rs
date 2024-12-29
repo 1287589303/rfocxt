@@ -859,6 +859,26 @@ impl SyntaxContext {
         }
     }
 
+    fn get_impl_structs(&self) -> Vec<String> {
+        let mut structs: Vec<String> = Vec::new();
+        for impl_item in self.impls.iter() {
+            if let Some(_) = impl_item.get_trait_name() {
+                structs.push(impl_item.get_struct_name());
+            }
+        }
+        structs
+    }
+
+    fn get_impl_traits(&self) -> Vec<String> {
+        let mut traits: Vec<String> = Vec::new();
+        for impl_item in self.impls.iter() {
+            if let Some(trait_name) = impl_item.get_trait_name() {
+                traits.push(trait_name);
+            }
+        }
+        traits
+    }
+
     pub fn get_context(
         &self,
         output_path: &PathBuf,
@@ -874,28 +894,47 @@ impl SyntaxContext {
             syntax_context.functions.push(function_item.clone());
             already_applications.push(function_item.get_function_name());
             remain_applications.extend(function_item.get_applications());
-            let size = remain_applications.len() as i32;
-            let mut i = 0;
             while !remain_applications.is_empty() {
                 let item_name = remain_applications.remove(0);
                 if !already_applications.contains(&item_name) {
                     already_applications.push(item_name.clone());
                     let mut named_syntax_context = SyntaxContext::new();
-                    if i < size {
-                        for main_mod_context in main_mod_contexts.iter() {
-                            main_mod_context.get_all_item(&item_name, &mut named_syntax_context);
-                        }
-                    } else {
-                        for main_mod_context in main_mod_contexts.iter() {
-                            main_mod_context
-                                .get_all_simplified_item(&item_name, &mut named_syntax_context)
-                        }
+                    for main_mod_context in main_mod_contexts.iter() {
+                        main_mod_context.get_all_item(&item_name, &mut named_syntax_context);
                     }
                     syntax_context.extend_with_other(&named_syntax_context);
-                    remain_applications.extend(named_syntax_context.get_all_applications());
                 }
-                i = i + 1;
             }
+            let traits = syntax_context.get_impl_traits();
+            for trait_name in traits.iter() {
+                if !already_applications.contains(trait_name) {
+                    remain_applications.push(trait_name.clone());
+                }
+            }
+            while !remain_applications.is_empty() {
+                let item_name = remain_applications.remove(0);
+                already_applications.push(item_name.clone());
+                let mut named_syntax_context = SyntaxContext::new();
+                for main_mod_context in main_mod_contexts.iter() {
+                    main_mod_context.get_all_item(&item_name, &mut named_syntax_context);
+                }
+                syntax_context.extend_with_other(&named_syntax_context);
+            }
+            // let structs = syntax_context.get_impl_structs();
+            // for struct_name in structs.iter() {
+            //     if !already_applications.contains(struct_name) {
+            //         remain_applications.push(struct_name.clone());
+            //     }
+            // }
+            // while !remain_applications.is_empty() {
+            //     let item_name = remain_applications.remove(0);
+            //     already_applications.push(item_name.clone());
+            //     let mut named_syntax_context = SyntaxContext::new();
+            //     for main_mod_context in main_mod_contexts.iter() {
+            //         main_mod_context.get_all_item(&item_name, &mut named_syntax_context);
+            //     }
+            //     syntax_context.extend_with_other(&named_syntax_context);
+            // }
             let rs_file_name = complete_function_name + ".rs";
             let output_file_path = output_path.join(rs_file_name);
             let mut file = File::create(output_file_path).unwrap();
@@ -915,30 +954,48 @@ impl SyntaxContext {
                     remain_applications.push(trait_name);
                 }
                 remain_applications.extend(function_item.get_applications());
-                let size = remain_applications.len() as i32;
-                let mut i = 0;
                 let mut syntax_context = SyntaxContext::new();
                 while !remain_applications.is_empty() {
                     let item_name = remain_applications.remove(0);
                     if !already_applications.contains(&item_name) {
                         already_applications.push(item_name.clone());
                         let mut named_syntax_context = SyntaxContext::new();
-                        if i < size {
-                            for main_mod_context in main_mod_contexts.iter() {
-                                main_mod_context
-                                    .get_all_item(&item_name, &mut named_syntax_context);
-                            }
-                        } else {
-                            for main_mod_context in main_mod_contexts.iter() {
-                                main_mod_context
-                                    .get_all_simplified_item(&item_name, &mut named_syntax_context)
-                            }
+                        for main_mod_context in main_mod_contexts.iter() {
+                            main_mod_context.get_all_item(&item_name, &mut named_syntax_context);
                         }
                         syntax_context.extend_with_other(&named_syntax_context);
-                        remain_applications.extend(named_syntax_context.get_all_applications());
                     }
-                    i = i + 1;
                 }
+                let traits = syntax_context.get_impl_traits();
+                for trait_name in traits.iter() {
+                    if !already_applications.contains(trait_name) {
+                        remain_applications.push(trait_name.clone());
+                    }
+                }
+                while !remain_applications.is_empty() {
+                    let item_name = remain_applications.remove(0);
+                    already_applications.push(item_name.clone());
+                    let mut named_syntax_context = SyntaxContext::new();
+                    for main_mod_context in main_mod_contexts.iter() {
+                        main_mod_context.get_all_item(&item_name, &mut named_syntax_context);
+                    }
+                    syntax_context.extend_with_other(&named_syntax_context);
+                }
+                // let structs = syntax_context.get_impl_structs();
+                // for struct_name in structs.iter() {
+                //     if !already_applications.contains(struct_name) {
+                //         remain_applications.push(struct_name.clone());
+                //     }
+                // }
+                // while !remain_applications.is_empty() {
+                //     let item_name = remain_applications.remove(0);
+                //     already_applications.push(item_name.clone());
+                //     let mut named_syntax_context = SyntaxContext::new();
+                //     for main_mod_context in main_mod_contexts.iter() {
+                //         main_mod_context.get_all_item(&item_name, &mut named_syntax_context);
+                //     }
+                //     syntax_context.extend_with_other(&named_syntax_context);
+                // }
                 let rs_file_name = complete_function_name + ".rs";
                 let output_file_path = output_path.join(rs_file_name);
                 let mut file = File::create(output_file_path).unwrap();
@@ -956,29 +1013,47 @@ impl SyntaxContext {
                 remain_applications.push(trait_name);
                 let mut syntax_context = SyntaxContext::new();
                 remain_applications.extend(function_item.get_applications());
-                let size = remain_applications.len() as i32;
-                let mut i = 0;
                 while !remain_applications.is_empty() {
                     let item_name = remain_applications.remove(0);
                     if !already_applications.contains(&item_name) {
                         already_applications.push(item_name.clone());
                         let mut named_syntax_context = SyntaxContext::new();
-                        if i < size {
-                            for main_mod_context in main_mod_contexts.iter() {
-                                main_mod_context
-                                    .get_all_item(&item_name, &mut named_syntax_context);
-                            }
-                        } else {
-                            for main_mod_context in main_mod_contexts.iter() {
-                                main_mod_context
-                                    .get_all_simplified_item(&item_name, &mut named_syntax_context)
-                            }
+                        for main_mod_context in main_mod_contexts.iter() {
+                            main_mod_context.get_all_item(&item_name, &mut named_syntax_context);
                         }
                         syntax_context.extend_with_other(&named_syntax_context);
-                        remain_applications.extend(named_syntax_context.get_all_applications());
                     }
-                    i = i + 1;
                 }
+                let traits = syntax_context.get_impl_traits();
+                for trait_name in traits.iter() {
+                    if !already_applications.contains(trait_name) {
+                        remain_applications.push(trait_name.clone());
+                    }
+                }
+                while !remain_applications.is_empty() {
+                    let item_name = remain_applications.remove(0);
+                    already_applications.push(item_name.clone());
+                    let mut named_syntax_context = SyntaxContext::new();
+                    for main_mod_context in main_mod_contexts.iter() {
+                        main_mod_context.get_all_item(&item_name, &mut named_syntax_context);
+                    }
+                    syntax_context.extend_with_other(&named_syntax_context);
+                }
+                // let structs = syntax_context.get_impl_structs();
+                // for struct_name in structs.iter() {
+                //     if !already_applications.contains(struct_name) {
+                //         remain_applications.push(struct_name.clone());
+                //     }
+                // }
+                // while !remain_applications.is_empty() {
+                //     let item_name = remain_applications.remove(0);
+                //     already_applications.push(item_name.clone());
+                //     let mut named_syntax_context = SyntaxContext::new();
+                //     for main_mod_context in main_mod_contexts.iter() {
+                //         main_mod_context.get_all_item(&item_name, &mut named_syntax_context);
+                //     }
+                //     syntax_context.extend_with_other(&named_syntax_context);
+                // }
                 let rs_file_name = complete_function_name + ".rs";
                 let output_file_path = output_path.join(rs_file_name);
                 let mut file = File::create(output_file_path).unwrap();

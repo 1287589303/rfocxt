@@ -1,35 +1,77 @@
 use std::process;
 
 use syn::{
-    ImplItem as SynImplItem, ImplItemConst, ImplItemFn, ImplItemType, Item, ItemConst, ItemEnum,
-    ItemFn, ItemImpl, ItemMod, ItemStatic, ItemStruct, ItemTrait, ItemTraitAlias, ItemType,
-    ItemUnion, ItemUse, TraitItem as SynTraitItem, TraitItemConst, TraitItemFn, TraitItemType,
+    ImplItemConst, ImplItemFn, ImplItemType, Item, ItemConst, ItemEnum, ItemFn, ItemImpl, ItemMod,
+    ItemStatic, ItemStruct, ItemTrait, ItemTraitAlias, ItemType, ItemUnion, ItemUse,
+    TraitItemConst, TraitItemFn, TraitItemType,
 };
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Applications {
-    applications: Vec<String>,
+pub struct MyPath {
+    name: String,
+    next: Option<Box<MyPath>>,
 }
 
-impl Applications {
-    pub fn new() -> Self {
-        Applications {
-            applications: Vec::new(),
+impl MyPath {
+    pub fn none() -> Self {
+        MyPath {
+            name: String::new(),
+            next: None,
         }
     }
 
-    pub fn insert_application(&mut self, application: &String) {
-        self.applications.push(application.clone());
-    }
-
-    pub fn insert_applications(&mut self, applications: &Vec<String>) {
-        self.applications = applications.clone()
-    }
-
-    pub fn get_applications(&self) -> Vec<String> {
-        return self.applications.clone();
+    pub fn new(import_path: String) -> Self {
+        let mut my_path = MyPath::none();
+        let paths = import_path.split("::").collect::<Vec<&str>>();
+        my_path.name = paths[0].to_string();
+        if paths.len() > 1 {
+            my_path.next = Some(Box::new(MyPath::new(paths[1..].join("::"))));
+        }
+        my_path
     }
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Name {
+    name: String,
+    complete_name: String,
+    import_name: MyPath,
+}
+
+impl Name {
+    pub fn new(name: String) -> Self {
+        Name {
+            name: name,
+            complete_name: String::new(),
+            import_name: MyPath::none(),
+        }
+    }
+}
+
+// #[derive(Debug, Clone, PartialEq)]
+// pub struct Applications {
+//     applications: Vec<String>,
+// }
+
+// impl Applications {
+//     pub fn new() -> Self {
+//         Applications {
+//             applications: Vec::new(),
+//         }
+//     }
+
+//     pub fn insert_application(&mut self, application: &String) {
+//         self.applications.push(application.clone());
+//     }
+
+//     pub fn insert_applications(&mut self, applications: &Vec<String>) {
+//         self.applications = applications.clone()
+//     }
+
+//     pub fn get_applications(&self) -> Vec<String> {
+//         return self.applications.clone();
+//     }
+// }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConstItem {
@@ -93,8 +135,8 @@ pub struct ModItem {
     mod_name: String,
     file_name: Option<String>,
     item: Option<ItemMod>,
-    inline: bool,
-    items: Vec<Item>,
+    // inline: bool,
+    inside_items: Vec<Item>,
 }
 
 impl ModItem {
@@ -103,8 +145,7 @@ impl ModItem {
             mod_name: String::new(),
             file_name: None,
             item: None,
-            inline: true,
-            items: Vec::new(),
+            inside_items: Vec::new(),
         }
     }
 
@@ -120,16 +161,8 @@ impl ModItem {
         self.item = Some(item.clone());
     }
 
-    pub fn change_is_inline(&mut self, is_inline: bool) {
-        self.inline = is_inline;
-    }
-
-    pub fn is_inline(&self) -> bool {
-        return self.inline;
-    }
-
     pub fn insert_items(&mut self, items: &Vec<Item>) {
-        self.items = items.clone();
+        self.inside_items = items.clone();
     }
 
     pub fn get_mod_name(&self) -> String {
@@ -187,29 +220,13 @@ impl TypeItem {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum MyItemFn {
-    Fn(ItemFn),
-    ImplFn(ImplItemFn),
-    TraitFn(TraitItemFn),
-}
-
 #[derive(Debug, Clone)]
-pub struct FunctionItem {
-    function_name: String,
-    complete_function_name_in_file: String,
-    item: Option<MyItemFn>,
-    items: Vec<Item>,
-    application: Applications,
-}
-
-impl PartialEq for FunctionItem {
-    fn eq(&self, other: &Self) -> bool {
-        return self.function_name == other.function_name
-            && self.complete_function_name_in_file == other.complete_function_name_in_file
-            && self.items == other.items
-            && self.application == other.application;
-    }
+pub struct FnItem {
+    name: Name,
+    item: Option<ItemFn>,
+    // has_items: bool,
+    inside_items: Vec<Item>,
+    // application: Applications,
 }
 
 impl FunctionItem {
@@ -282,27 +299,33 @@ impl FunctionItem {
 }
 
 #[derive(Debug, Clone)]
-pub struct ImplItem {
-    impl_num: i32,
-    struct_name: String,
-    trait_name: Option<String>,
-    item: Option<ItemImpl>,
-    types: Vec<ImplItemType>,
-    consts: Vec<ImplItemConst>,
-    functions: Vec<FunctionItem>,
-    applications: Applications,
+pub struct ImplTypeItem {
+    item: Option<ImplItemType>,
 }
 
-impl PartialEq for ImplItem {
-    fn eq(&self, other: &Self) -> bool {
-        return self.impl_num == other.impl_num
-            && self.struct_name == other.struct_name
-            && self.trait_name == other.trait_name
-            && self.types == other.types
-            && self.consts == other.consts
-            && self.functions == other.functions
-            && self.applications == other.applications;
-    }
+#[derive(Debug, Clone)]
+pub struct ImplConstItem {
+    item: Option<ImplItemConst>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ImplFnItem {
+    name: Name,
+    item: Option<ImplItemFn>,
+    // has_items: bool,
+    inside_items: Vec<Item>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ImplItem {
+    impl_num: i32,
+    struct_name: Name,
+    trait_name: Option<Name>,
+    item: Option<ItemImpl>,
+    types: Vec<ImplTypeItem>,
+    consts: Vec<ImplConstItem>,
+    functions: Vec<ImplFnItem>,
+    // applications: Applications,
 }
 
 impl ImplItem {
@@ -382,9 +405,9 @@ impl ImplItem {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StructItem {
-    struct_name: String,
+    struct_name: Name,
     item: Option<ItemStruct>,
-    applications: Applications,
+    // applications: Applications,
 }
 
 impl StructItem {
@@ -423,9 +446,9 @@ impl StructItem {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EnumItem {
-    enum_name: String,
+    enum_name: Name,
     item: Option<ItemEnum>,
-    applications: Applications,
+    // applications: Applications,
 }
 
 impl EnumItem {
@@ -464,9 +487,9 @@ impl EnumItem {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnionItem {
-    union_name: String,
+    union_name: Name,
     item: Option<ItemUnion>,
-    applications: Applications,
+    // applications: Applications,
 }
 
 impl UnionItem {
@@ -504,23 +527,31 @@ impl UnionItem {
 }
 
 #[derive(Debug, Clone)]
-pub struct TraitItem {
-    trait_name: String,
-    item: Option<ItemTrait>,
-    types: Vec<TraitItemType>,
-    consts: Vec<TraitItemConst>,
-    functions: Vec<FunctionItem>,
-    applications: Applications,
+pub struct TraitTypeItem {
+    item: Option<TraitItemType>,
 }
 
-impl PartialEq for TraitItem {
-    fn eq(&self, other: &Self) -> bool {
-        return self.trait_name == other.trait_name
-            && self.types == other.types
-            && self.consts == other.consts
-            && self.functions == other.functions
-            && self.applications == other.applications;
-    }
+#[derive(Debug, Clone)]
+pub struct TraitConstItem {
+    item: Option<TraitItemConst>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TraitFnItem {
+    name: Name,
+    item: Option<TraitItemFn>,
+    // has_items: bool,
+    inside_items: Vec<Item>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TraitItem {
+    trait_name: Name,
+    item: Option<ItemTrait>,
+    types: Vec<TraitTypeItem>,
+    consts: Vec<TraitConstItem>,
+    functions: Vec<TraitFnItem>,
+    // applications: Applications,
 }
 
 impl TraitItem {
@@ -583,8 +614,8 @@ impl TraitItem {
 #[derive(Debug, Clone)]
 pub struct UseTree {
     use_name: String,
-    use_tree: String,
     alias_name: String,
+    use_tree: MyPath,
 }
 
 impl UseTree {
@@ -593,52 +624,6 @@ impl UseTree {
             use_name: use_name,
             use_tree: use_tree,
             alias_name: alias_name,
-        }
-    }
-}
-
-pub trait ClearStmts {
-    fn clear_stmts(&mut self);
-}
-
-impl ClearStmts for ImplItem {
-    fn clear_stmts(&mut self) {
-        let items = self.item.as_mut().unwrap();
-        for item in items.items.iter_mut() {
-            match item {
-                SynImplItem::Fn(item_fn) => {
-                    item_fn.block.stmts = Vec::new();
-                }
-                _ => {}
-            }
-        }
-    }
-}
-
-impl ClearStmts for FunctionItem {
-    fn clear_stmts(&mut self) {
-        let item = self.item.as_mut().unwrap();
-        match item {
-            MyItemFn::Fn(item_fn) => {
-                item_fn.block.stmts = Vec::new();
-            }
-            _ => {}
-        }
-    }
-}
-
-impl ClearStmts for TraitItem {
-    fn clear_stmts(&mut self) {
-        let items = self.item.as_mut().unwrap();
-        for item in items.items.iter_mut() {
-            match item {
-                SynTraitItem::Fn(item_fn) => {
-                    if let Some(block) = item_fn.default.as_mut() {
-                        block.stmts = Vec::new();
-                    }
-                }
-                _ => {}
-            }
         }
     }
 }

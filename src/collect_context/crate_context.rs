@@ -14,8 +14,8 @@ use super::mod_context::{ModContext, ModInfo, ModModInfo};
 pub struct CrateContext {
     crate_name: String,
     crate_path: PathBuf,
-    entry_file_path: Vec<PathBuf>,
-    mod_context: Vec<ModContext>,
+    entry_file_paths: Vec<PathBuf>,
+    main_mod_contexts: Vec<ModContext>,
 }
 
 impl CrateContext {
@@ -23,8 +23,8 @@ impl CrateContext {
         let mut crate_context = CrateContext {
             crate_name: String::new(),
             crate_path: PathBuf::new(),
-            entry_file_path: Vec::new(),
-            mod_context: Vec::new(),
+            entry_file_paths: Vec::new(),
+            main_mod_contexts: Vec::new(),
         };
         let toml_path = crate_path.join("Cargo.toml");
         if fs::exists(&toml_path).unwrap() {
@@ -53,11 +53,11 @@ impl CrateContext {
         let lib_path = crate_path.join("src/lib.rs");
         let mut has_entry = false;
         if fs::exists(&main_path).unwrap() {
-            crate_context.entry_file_path.push(main_path);
+            crate_context.entry_file_paths.push(main_path);
             has_entry = true;
         }
         if fs::exists(&lib_path).unwrap() {
-            crate_context.entry_file_path.push(lib_path);
+            crate_context.entry_file_paths.push(lib_path);
             has_entry = true;
         }
         if has_entry == false {
@@ -68,7 +68,7 @@ impl CrateContext {
     }
 
     pub fn parse_crate(&mut self) {
-        for entry_file_path in self.entry_file_path.iter() {
+        for entry_file_path in self.entry_file_paths.iter() {
             let entry_code = read_to_string(entry_file_path).unwrap();
             let entry_syntax = parse_file(&entry_code).unwrap();
             let mut mod_mod_info = ModModInfo::new();
@@ -81,29 +81,29 @@ impl CrateContext {
             let mut mod_context = ModContext::new();
             mod_context.insert_mod_info(&mod_info);
             mod_context.parse_from_items(&entry_syntax.items);
-            self.mod_context.push(mod_context);
+            self.main_mod_contexts.push(mod_context);
         }
     }
 
     pub fn parse_all_context(&self) {
         let output_path = self.crate_path.join("rfocxt");
         fs::create_dir_all(&output_path).unwrap();
-        for mod_context in self.mod_context.iter() {
-            mod_context.get_all_context(&output_path, &self.mod_context);
+        for mod_context in self.main_mod_contexts.iter() {
+            mod_context.get_all_context(&output_path, &self.main_mod_contexts);
         }
     }
 
     pub fn cout_in_one_file_for_test(&self) {
-        let output_path = self.crate_path.join("context.txt");
+        let output_path = self.crate_path.join("rfocxt/context.txt");
         let mut file = File::create(&output_path).unwrap();
         file.write_all(format!("{:#?}", self).as_bytes()).unwrap();
     }
 
     pub fn cout_all_mod_trees_in_on_file_for_test(&self) {
-        let output_path = self.crate_path.join("mod_trees");
+        let output_path = self.crate_path.join("rfocxt/mod_trees");
         fs::create_dir_all(&output_path).unwrap();
         let mut num = 0;
-        for mod_context in self.mod_context.iter() {
+        for mod_context in self.main_mod_contexts.iter() {
             let mut mod_trees: Vec<String> = Vec::new();
             mod_context.get_all_mod_trees(&mut mod_trees);
             let output_file_path = output_path.join(format!("mod_tree{}.txt", num));
@@ -115,10 +115,10 @@ impl CrateContext {
     }
 
     pub fn cout_complete_function_name_in_on_file_for_test(&self) {
-        let output_path = self.crate_path.join("functions");
+        let output_path = self.crate_path.join("rfocxt/functions");
         fs::create_dir_all(&output_path).unwrap();
         let mut num = 0;
-        for mod_context in self.mod_context.iter() {
+        for mod_context in self.main_mod_contexts.iter() {
             let mut function_names: Vec<String> = Vec::new();
             mod_context.get_complete_function_names(&mut function_names);
             function_names.sort();
