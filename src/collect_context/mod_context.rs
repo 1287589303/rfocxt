@@ -1,12 +1,15 @@
 use std::{
-    fs::{self, read_to_string, File},
+    cell::RefCell,
+    fmt,
+    fs::{self, read_to_string},
     path::PathBuf,
     process,
+    rc::Rc,
 };
 
 use syn::{parse_file, Item};
 
-use super::syntax_context::{self, SyntaxContext};
+use super::syntax_context::SyntaxContext;
 
 #[derive(Debug, Clone)]
 pub struct ModModInfo {
@@ -151,53 +154,76 @@ impl ModInfo {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ModContext {
     mod_info: ModInfo,
     syntax_context: SyntaxContext,
-    sub_mods: Vec<ModContext>,
+    sub_mods: Vec<Rc<RefCell<ModContext>>>,
+    parent_mod: Option<Rc<RefCell<ModContext>>>,
+    crate_mod: Option<Rc<RefCell<ModContext>>>,
+}
+
+impl fmt::Debug for ModContext {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "ModContext {{\n mod_info: {:#?},\n syntax_context: {:#?},\n sub_mods: {:#?}\n }}\n",
+            self.mod_info, self.syntax_context, self.sub_mods
+        )
+    }
 }
 
 impl ModContext {
-    pub fn new() -> Self {
-        ModContext {
+    pub fn new() -> Rc<RefCell<Self>> {
+        Rc::new(RefCell::new(ModContext {
             mod_info: ModInfo::new(),
             syntax_context: SyntaxContext::new(),
             sub_mods: Vec::new(),
-        }
+            parent_mod: None,
+            crate_mod: None,
+        }))
     }
 
-    pub fn parse_from_items(&mut self, items: &Vec<Item>) {
-        self.syntax_context = SyntaxContext::from_items(items);
-        let inline_mods = self.syntax_context.get_inline_mods();
-        let no_inline_mods = self.syntax_context.get_no_inline_mods();
-        let functions_with_items = self.syntax_context.get_functions_with_items();
+    pub fn parse_from_items(
+        parent: &Rc<RefCell<ModContext>>,
+        items: &Vec<Item>,
+        crate_mod: &Option<Rc<RefCell<ModContext>>>,
+    ) {
+        parent.borrow_mut().syntax_context = SyntaxContext::from_items(items);
+        let inline_mods = parent.borrow().syntax_context.get_inline_mods();
+        let no_inline_mods = parent.borrow().syntax_context.get_no_inline_mods();
+        let functions_with_items = parent.borrow().syntax_context.get_functions_with_items();
         for inline_mod in inline_mods.iter() {
             let mut mod_mod_info = ModModInfo::new();
             mod_mod_info.insert_mod_name(&inline_mod.get_mod_name());
-            mod_mod_info.insert_parent_mod_tree(&self.mod_info.get_mod_tree());
+            mod_mod_info.insert_parent_mod_tree(&parent.borrow().mod_info.get_mod_tree());
             let mod_info = ModInfo::Mod(mod_mod_info);
-            let mut sub_mod = ModContext::new();
-            sub_mod.insert_mod_info(&mod_info);
-            sub_mod.parse_from_items(&inline_mod.get_items());
-            self.sub_mods.push(sub_mod);
+            let sub_mod = ModContext::new();
+            sub_mod.borrow_mut().insert_mod_info(&mod_info);
+            ModContext::parse_from_items(&sub_mod, &inline_mod.get_items(), crate_mod);
+            sub_mod.borrow_mut().parent_mod = Some(Rc::clone(parent));
+            sub_mod.borrow_mut().crate_mod = Some(Rc::clone(crate_mod.as_ref().unwrap()));
+            parent.borrow_mut().sub_mods.push(sub_mod);
         }
         for function_with_item in functions_with_items.iter() {
             let mut function_mod_info = FunctionModInfo::new();
             function_mod_info
                 .insert_function_name(&&function_with_item.get_complete_function_name_in_file());
-            function_mod_info.insert_parent_mod_tree(&self.mod_info.get_mod_tree());
+            function_mod_info.insert_parent_mod_tree(&parent.borrow().mod_info.get_mod_tree());
             let mod_info = ModInfo::Fn(function_mod_info);
-            let mut sub_mod = ModContext::new();
-            sub_mod.insert_mod_info(&mod_info);
-            sub_mod.parse_from_items(&function_with_item.get_items());
-            self.sub_mods.push(sub_mod);
+            let sub_mod = ModContext::new();
+            sub_mod.borrow_mut().insert_mod_info(&mod_info);
+            ModContext::parse_from_items(&sub_mod, &function_with_item.get_items(), crate_mod);
+            sub_mod.borrow_mut().crate_mod = Some(Rc::clone(crate_mod.as_ref().unwrap()));
+            parent.borrow_mut().sub_mods.push(sub_mod);
         }
         for no_inline_mod in no_inline_mods.iter() {
             let mut mod_mod_info = ModModInfo::new();
             mod_mod_info.insert_mod_name(&no_inline_mod.get_mod_name());
-            mod_mod_info.insert_parent_mod_tree(&self.mod_info.get_mod_tree());
-            mod_mod_info.insert_parent_directory_path(&self.mod_info.get_parent_directory_path());
+            mod_mod_info.insert_parent_mod_tree(&parent.borrow().mod_info.get_mod_tree());
+            mod_mod_info.insert_parent_directory_path(
+                &parent.borrow().mod_info.get_parent_directory_path(),
+            );
             let mut rs_file_name = String::new();
             let mut single_file_path = PathBuf::new();
             let mut mod_directory_path = PathBuf::new();
@@ -217,10 +243,11 @@ impl ModContext {
                     let code = read_to_string(&mod_file_path).unwrap();
                     let syntax = parse_file(&code).unwrap();
                     let mod_info = ModInfo::Mod(mod_mod_info);
-                    let mut sub_mod = ModContext::new();
-                    sub_mod.insert_mod_info(&mod_info);
-                    sub_mod.parse_from_items(&syntax.items);
-                    self.sub_mods.push(sub_mod);
+                    let sub_mod = ModContext::new();
+                    sub_mod.borrow_mut().insert_mod_info(&mod_info);
+                    ModContext::parse_from_items(&sub_mod, &syntax.items, crate_mod);
+                    sub_mod.borrow_mut().crate_mod = Some(Rc::clone(crate_mod.as_ref().unwrap()));
+                    parent.borrow_mut().sub_mods.push(sub_mod);
                 } else if fs::exists(&single_file_path).unwrap() {
                     if fs::exists(&mod_directory_path).unwrap() {
                         mod_mod_info.insert_file_path(&single_file_path);
@@ -229,19 +256,23 @@ impl ModContext {
                         let code = read_to_string(&single_file_path).unwrap();
                         let syntax = parse_file(&code).unwrap();
                         let mod_info = ModInfo::Mod(mod_mod_info);
-                        let mut sub_mod = ModContext::new();
-                        sub_mod.insert_mod_info(&mod_info);
-                        sub_mod.parse_from_items(&syntax.items);
-                        self.sub_mods.push(sub_mod);
+                        let sub_mod = ModContext::new();
+                        sub_mod.borrow_mut().insert_mod_info(&mod_info);
+                        ModContext::parse_from_items(&sub_mod, &syntax.items, crate_mod);
+                        sub_mod.borrow_mut().crate_mod =
+                            Some(Rc::clone(crate_mod.as_ref().unwrap()));
+                        parent.borrow_mut().sub_mods.push(sub_mod);
                     } else {
                         mod_mod_info.insert_file_path(&single_file_path);
                         let code = read_to_string(&single_file_path).unwrap();
                         let syntax = parse_file(&code).unwrap();
                         let mod_info = ModInfo::Mod(mod_mod_info);
-                        let mut sub_mod = ModContext::new();
-                        sub_mod.insert_mod_info(&mod_info);
-                        sub_mod.parse_from_items(&syntax.items);
-                        self.sub_mods.push(sub_mod);
+                        let sub_mod = ModContext::new();
+                        sub_mod.borrow_mut().insert_mod_info(&mod_info);
+                        ModContext::parse_from_items(&sub_mod, &syntax.items, crate_mod);
+                        sub_mod.borrow_mut().crate_mod =
+                            Some(Rc::clone(crate_mod.as_ref().unwrap()));
+                        parent.borrow_mut().sub_mods.push(sub_mod);
                     }
                 } else {
                     eprintln!("Wrong when parse mod path in the crate!");
@@ -260,7 +291,8 @@ impl ModContext {
                         .unwrap()
                         .to_string_lossy()
                         .to_string();
-                    mod_directory_path = self
+                    mod_directory_path = parent
+                        .borrow()
                         .mod_info
                         .get_parent_directory_path()
                         .join(mod_path_name);
@@ -272,10 +304,12 @@ impl ModContext {
                         let code = read_to_string(&mod_file_path).unwrap();
                         let syntax = parse_file(&code).unwrap();
                         let mod_info = ModInfo::Mod(mod_mod_info);
-                        let mut sub_mod = ModContext::new();
-                        sub_mod.insert_mod_info(&mod_info);
-                        sub_mod.parse_from_items(&syntax.items);
-                        self.sub_mods.push(sub_mod);
+                        let sub_mod = ModContext::new();
+                        sub_mod.borrow_mut().insert_mod_info(&mod_info);
+                        ModContext::parse_from_items(&sub_mod, &syntax.items, crate_mod);
+                        sub_mod.borrow_mut().crate_mod =
+                            Some(Rc::clone(crate_mod.as_ref().unwrap()));
+                        parent.borrow_mut().sub_mods.push(sub_mod);
                     } else {
                         eprintln!("Wrong when parse mod path in the crate!");
                         process::exit(10);
@@ -286,11 +320,13 @@ impl ModContext {
                         .unwrap()
                         .to_string_lossy()
                         .to_string();
-                    mod_directory_path = self
+                    mod_directory_path = parent
+                        .borrow()
                         .mod_info
                         .get_parent_directory_path()
                         .join(mod_path_name);
-                    mod_file_path = self
+                    mod_file_path = parent
+                        .borrow()
                         .mod_info
                         .get_parent_directory_path()
                         .join(file_name_path);
@@ -302,19 +338,23 @@ impl ModContext {
                             let code = read_to_string(&mod_file_path).unwrap();
                             let syntax = parse_file(&code).unwrap();
                             let mod_info = ModInfo::new();
-                            let mut sub_mod = ModContext::new();
-                            sub_mod.insert_mod_info(&mod_info);
-                            sub_mod.parse_from_items(&syntax.items);
-                            self.sub_mods.push(sub_mod);
+                            let sub_mod = ModContext::new();
+                            sub_mod.borrow_mut().insert_mod_info(&mod_info);
+                            ModContext::parse_from_items(&sub_mod, &syntax.items, crate_mod);
+                            sub_mod.borrow_mut().crate_mod =
+                                Some(Rc::clone(crate_mod.as_ref().unwrap()));
+                            parent.borrow_mut().sub_mods.push(sub_mod);
                         } else {
                             mod_mod_info.insert_file_path(&mod_file_path);
                             let code = read_to_string(&mod_file_path).unwrap();
                             let syntax = parse_file(&code).unwrap();
                             let mod_info = ModInfo::new();
-                            let mut sub_mod = ModContext::new();
-                            sub_mod.insert_mod_info(&mod_info);
-                            sub_mod.parse_from_items(&syntax.items);
-                            self.sub_mods.push(sub_mod);
+                            let sub_mod = ModContext::new();
+                            sub_mod.borrow_mut().insert_mod_info(&mod_info);
+                            ModContext::parse_from_items(&sub_mod, &syntax.items, crate_mod);
+                            sub_mod.borrow_mut().crate_mod =
+                                Some(Rc::clone(crate_mod.as_ref().unwrap()));
+                            parent.borrow_mut().sub_mods.push(sub_mod);
                         }
                     } else {
                         eprintln!("Wrong when parse mod path in the crate!");
@@ -332,7 +372,7 @@ impl ModContext {
     pub fn get_all_mod_trees(&self, mod_trees: &mut Vec<String>) {
         mod_trees.push(self.mod_info.get_mod_tree());
         for sub_mod in self.sub_mods.iter() {
-            sub_mod.get_all_mod_trees(mod_trees);
+            sub_mod.borrow().get_all_mod_trees(mod_trees);
         }
     }
 
@@ -343,34 +383,38 @@ impl ModContext {
             function_names.push(mod_tree.clone() + "::" + single_function_name);
         }
         for sub_mod in self.sub_mods.iter() {
-            sub_mod.get_complete_function_names(function_names);
+            sub_mod.borrow().get_complete_function_names(function_names);
         }
     }
 
-    pub fn get_all_item(&self, item_name: &String, syntax_context: &mut SyntaxContext) {
-        let one_syntax_context = self.syntax_context.get_item(item_name);
-        syntax_context.extend_with_other(&one_syntax_context);
-        for sub_mod in self.sub_mods.iter() {
-            sub_mod.get_all_item(item_name, syntax_context);
-        }
-    }
+    // pub fn get_all_item(&self, item_name: &String, syntax_context: &mut SyntaxContext) {
+    //     let one_syntax_context = self.syntax_context.get_item(item_name);
+    //     syntax_context.extend_with_other(&one_syntax_context);
+    //     for sub_mod in self.sub_mods.iter() {
+    //         sub_mod.borrow().get_all_item(item_name, syntax_context);
+    //     }
+    // }
 
-    pub fn get_all_simplified_item(&self, item_name: &String, syntax_context: &mut SyntaxContext) {
-        let one_syntax_context = self.syntax_context.get_simplified_item(item_name);
-        syntax_context.extend_with_other(&one_syntax_context);
-        for sub_mod in self.sub_mods.iter() {
-            sub_mod.get_all_simplified_item(item_name, syntax_context);
-        }
-    }
+    // pub fn get_all_simplified_item(&self, item_name: &String, syntax_context: &mut SyntaxContext) {
+    //     let one_syntax_context = self.syntax_context.get_simplified_item(item_name);
+    //     syntax_context.extend_with_other(&one_syntax_context);
+    //     for sub_mod in self.sub_mods.iter() {
+    //         sub_mod
+    //             .borrow()
+    //             .get_all_simplified_item(item_name, syntax_context);
+    //     }
+    // }
 
-    pub fn get_all_context(&self, output_path: &PathBuf, main_mod_contexts: &Vec<ModContext>) {
-        self.syntax_context.get_context(
-            output_path,
-            &self.mod_info.get_mod_tree(),
-            main_mod_contexts,
-        );
-        for sub_mod in self.sub_mods.iter() {
-            sub_mod.get_all_context(output_path, main_mod_contexts);
-        }
-    }
+    // pub fn get_all_context(&self, output_path: &PathBuf, main_mod_contexts: &Vec<ModContext>) {
+    //     self.syntax_context.get_context(
+    //         output_path,
+    //         &self.mod_info.get_mod_tree(),
+    //         main_mod_contexts,
+    //     );
+    //     for sub_mod in self.sub_mods.iter() {
+    //         sub_mod
+    //             .borrow()
+    //             .get_all_context(output_path, main_mod_contexts);
+    //     }
+    // }
 }

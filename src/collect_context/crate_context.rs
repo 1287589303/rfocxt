@@ -1,8 +1,10 @@
 use std::{
+    cell::RefCell,
     fs::{self, read_to_string, File},
     io::Write,
     path::PathBuf,
     process,
+    rc::Rc,
 };
 
 use syn::parse_file;
@@ -15,7 +17,7 @@ pub struct CrateContext {
     crate_name: String,
     crate_path: PathBuf,
     entry_file_paths: Vec<PathBuf>,
-    main_mod_contexts: Vec<ModContext>,
+    main_mod_contexts: Vec<Rc<RefCell<ModContext>>>,
 }
 
 impl CrateContext {
@@ -78,23 +80,28 @@ impl CrateContext {
             mod_mod_info
                 .insert_parent_directory_path(&entry_file_path.parent().unwrap().to_path_buf());
             let mod_info = ModInfo::Mod(mod_mod_info);
-            let mut mod_context = ModContext::new();
-            mod_context.insert_mod_info(&mod_info);
-            mod_context.parse_from_items(&entry_syntax.items);
+            let mod_context = ModContext::new();
+            mod_context.borrow_mut().insert_mod_info(&mod_info);
+            ModContext::parse_from_items(
+                &mod_context,
+                &entry_syntax.items,
+                &Some(Rc::clone(&mod_context)),
+            );
             self.main_mod_contexts.push(mod_context);
         }
     }
 
-    pub fn parse_all_context(&self) {
-        let output_path = self.crate_path.join("rfocxt");
-        fs::create_dir_all(&output_path).unwrap();
-        for mod_context in self.main_mod_contexts.iter() {
-            mod_context.get_all_context(&output_path, &self.main_mod_contexts);
-        }
-    }
+    // pub fn parse_all_context(&self) {
+    //     let output_path = self.crate_path.join("rfocxt");
+    //     fs::create_dir_all(&output_path).unwrap();
+    //     for mod_context in self.main_mod_contexts.iter() {
+    //         mod_context.borrow().get_all_context(&output_path);
+    //     }
+    // }
 
     pub fn cout_in_one_file_for_test(&self) {
         let output_path = self.crate_path.join("rfocxt/context.txt");
+        fs::create_dir_all(output_path.parent().unwrap()).unwrap();
         let mut file = File::create(&output_path).unwrap();
         file.write_all(format!("{:#?}", self).as_bytes()).unwrap();
     }
@@ -105,7 +112,7 @@ impl CrateContext {
         let mut num = 0;
         for mod_context in self.main_mod_contexts.iter() {
             let mut mod_trees: Vec<String> = Vec::new();
-            mod_context.get_all_mod_trees(&mut mod_trees);
+            mod_context.borrow().get_all_mod_trees(&mut mod_trees);
             let output_file_path = output_path.join(format!("mod_tree{}.txt", num));
             let mut file = File::create(&output_file_path).unwrap();
             file.write_all(format!("{:#?}", mod_trees).as_bytes())
@@ -120,7 +127,9 @@ impl CrateContext {
         let mut num = 0;
         for mod_context in self.main_mod_contexts.iter() {
             let mut function_names: Vec<String> = Vec::new();
-            mod_context.get_complete_function_names(&mut function_names);
+            mod_context
+                .borrow()
+                .get_complete_function_names(&mut function_names);
             function_names.sort();
             let output_file_path = output_path.join(format!("function{}.txt", num));
             let mut file = File::create(&output_file_path).unwrap();

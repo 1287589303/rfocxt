@@ -65,7 +65,8 @@ impl MirCheckerCallbacks {
         for id in hir_krate.items() {
             let item = id.owner_id.def_id;
             match tcx.def_kind(item) {
-                def::DefKind::Fn => {
+                def::DefKind::Fn | def::DefKind::AssocFn => {
+                    // println!("{:#?}", item);
                     let fn_name = format!("{:?}", item.to_def_id());
                     let hir = hir_krate.body_owned_by(item);
                     let mir = tcx.mir_built(item).borrow();
@@ -80,25 +81,9 @@ impl MirCheckerCallbacks {
                     let file_path = PathBuf::from(&directory_path).join(format!("{}.txt", fn_name));
                     let mut file = File::create(&file_path).unwrap();
                     file.write_all(format!("{:#?}", mir).as_bytes()).unwrap();
-                    let expr = hir.value;
-                    if let ExprKind::Block(block, _) = expr.kind {
-                        for stmt in block.stmts.iter() {
-                            match stmt.kind {
-                                StmtKind::Let(let_stmt) => {
-                                    let init = let_stmt.init.unwrap();
-                                    if let ExprKind::Call(call_expr, _) = init.kind {
-                                        if let ExprKind::Path(path) = call_expr.kind {
-                                            println!("{:#?}", path.span());
-                                        }
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
                 }
                 _ => {
-                    // println!("mir other kind: {:?}", tcx.def_kind(item));
+                    println!("mir other kind: {:?}", tcx.def_kind(item));
                 }
             }
         }
