@@ -1,10 +1,15 @@
+use std::{cell::RefCell, rc::Rc};
+
 use syn::{
     ImplItemConst, ImplItemFn, ImplItemType, Item, ItemConst, ItemEnum, ItemFn, ItemImpl, ItemMod,
     ItemStatic, ItemStruct, ItemTrait, ItemTraitAlias, ItemType, ItemUnion, ItemUse,
     TraitItemConst, TraitItemFn, TraitItemType,
 };
 
-pub enum Visibility {
+use super::mod_context::ModContext;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum MyVisibility {
     PubT,
     PubS,
     PubI(MyPath),
@@ -33,6 +38,202 @@ impl MyPath {
             my_path.next = Some(Box::new(MyPath::new(&paths[1..].join("::"))));
         }
         my_path
+    }
+
+    pub fn new_with_copy(other_path: &MyPath) -> MyPath {
+        MyPath::new(&other_path.to_string())
+    }
+
+    fn get_names_recursively(&self, names: &mut Vec<String>) {
+        names.push(self.name.clone());
+        if let Some(next) = &self.next {
+            next.get_names_recursively(names);
+        }
+    }
+
+    pub fn to_string(&self) -> String {
+        let mut names: Vec<String> = Vec::new();
+        self.get_names_recursively(&mut names);
+        names.join("::")
+    }
+
+    fn up(&mut self) {
+        if let None = self.next.as_mut().unwrap().next {
+            self.next = None;
+        } else {
+            self.next.as_mut().unwrap().up();
+        }
+    }
+
+    fn down(&mut self, name: &String) {
+        if let None = self.next {
+            self.next = Some(Box::new(MyPath::new(&name)));
+        } else {
+            self.next.as_mut().unwrap().down(name);
+        }
+    }
+
+    pub fn get_directly_use_tree(
+        &mut self,
+        direct_name: &String,
+        original_path_string: &String,
+        mod_context: &Rc<RefCell<ModContext>>,
+        directly_use_tree: &mut MyPath,
+    ) -> bool {
+        // println!("{}", self.to_string());
+        // println!("{}", mod_context.borrow().get_mod_tree().to_string());
+        // println!();
+        let mut crate_name: String = String::new();
+        if mod_context.borrow().is_crate() {
+            crate_name = mod_context.borrow().get_mod_name();
+        } else {
+            crate_name = mod_context.borrow().get_crate().borrow().get_mod_name();
+        }
+        if self.name == "crate" {
+            if mod_context.borrow().is_crate() {
+                *directly_use_tree = MyPath::new(&mod_context.borrow().get_mod_name());
+                return self.next.as_mut().unwrap().get_directly_use_tree(
+                    direct_name,
+                    original_path_string,
+                    mod_context,
+                    directly_use_tree,
+                );
+            } else {
+                *directly_use_tree =
+                    MyPath::new(&mod_context.borrow().get_crate().borrow().get_mod_name());
+                return self.next.as_mut().unwrap().get_directly_use_tree(
+                    direct_name,
+                    original_path_string,
+                    mod_context.borrow().get_crate(),
+                    directly_use_tree,
+                );
+            }
+        } else if self.name == "super" {
+            *directly_use_tree = MyPath::new_with_copy(
+                &ModContext::get_parent_recursively(mod_context)
+                    .borrow()
+                    .get_mod_tree(),
+            );
+            return self.next.as_mut().unwrap().get_directly_use_tree(
+                direct_name,
+                original_path_string,
+                &ModContext::get_parent_recursively(mod_context),
+                directly_use_tree,
+            );
+        } else if self.name == "self" {
+            *directly_use_tree = MyPath::new_with_copy(&mod_context.borrow().get_mod_tree());
+            return self.next.as_mut().unwrap().get_directly_use_tree(
+                direct_name,
+                original_path_string,
+                mod_context,
+                directly_use_tree,
+            );
+        } else {
+            let pub_uses = mod_context.borrow().get_pub_use();
+            for pub_use in pub_uses.iter() {
+                let new_original_path_string = pub_use.get_use_tree().to_string();
+                let alias = pub_use.get_alias();
+                if let Some(alias) = alias {
+                    if alias == direct_name {
+                        if mod_context.borrow().is_crate() {
+                            *directly_use_tree = MyPath::new(&mod_context.borrow().get_mod_name());
+                            return pub_use.get_use_tree().clone().get_directly_use_tree(
+                                pub_use.get_name(),
+                                &new_original_path_string,
+                                mod_context,
+                                directly_use_tree,
+                            );
+                        } else {
+                            *directly_use_tree = MyPath::new(
+                                &mod_context.borrow().get_crate().borrow().get_mod_name(),
+                            );
+                            return pub_use.get_use_tree().clone().get_directly_use_tree(
+                                pub_use.get_name(),
+                                &new_original_path_string,
+                                mod_context,
+                                directly_use_tree,
+                            );
+                        }
+                    }
+                }
+                if pub_use.get_name() == direct_name
+                    && !new_original_path_string.eq(original_path_string)
+                {
+                    {
+                        if mod_context.borrow().is_crate() {
+                            *directly_use_tree = MyPath::new(&mod_context.borrow().get_mod_name());
+                            return pub_use.get_use_tree().clone().get_directly_use_tree(
+                                pub_use.get_name(),
+                                &new_original_path_string,
+                                mod_context,
+                                directly_use_tree,
+                            );
+                        } else {
+                            *directly_use_tree = MyPath::new(
+                                &mod_context.borrow().get_crate().borrow().get_mod_name(),
+                            );
+                            return pub_use.get_use_tree().clone().get_directly_use_tree(
+                                pub_use.get_name(),
+                                &new_original_path_string,
+                                mod_context,
+                                directly_use_tree,
+                            );
+                        }
+                    }
+                }
+            }
+            for sub_mod in mod_context.borrow().get_sub_mods() {
+                if sub_mod.borrow().is_mod_mod() && sub_mod.borrow().get_mod_name() == self.name {
+                    if let None = self.next {
+                        directly_use_tree.down(&self.name);
+                        return true;
+                    } else {
+                        directly_use_tree.down(&self.name);
+                        return self.next.as_mut().unwrap().get_directly_use_tree(
+                            direct_name,
+                            original_path_string,
+                            sub_mod,
+                            directly_use_tree,
+                        );
+                    }
+                }
+            }
+            if mod_context
+                .borrow()
+                .has_fn_struct_enum_union_trait(&self.name)
+            {
+                directly_use_tree.down(&self.name);
+                return true;
+            }
+            if self.name == crate_name {
+                if mod_context.borrow().is_crate() {
+                    *directly_use_tree = MyPath::new(&crate_name);
+                    return self.next.as_mut().unwrap().get_directly_use_tree(
+                        direct_name,
+                        original_path_string,
+                        mod_context,
+                        directly_use_tree,
+                    );
+                } else {
+                    *directly_use_tree = MyPath::new(&crate_name);
+                    return self.next.as_mut().unwrap().get_directly_use_tree(
+                        direct_name,
+                        original_path_string,
+                        mod_context.borrow().get_crate(),
+                        directly_use_tree,
+                    );
+                }
+            }
+            return false;
+        }
+    }
+
+    pub fn get_depth(&self) -> i32 {
+        if self.next.is_none() {
+            return 1;
+        } else {
+            return 1 + self.next.as_ref().unwrap().get_depth();
+        }
     }
 }
 
@@ -64,8 +265,75 @@ impl Name {
         self.complete_name = complete_name.clone();
     }
 
+    pub fn insert_import_name(&mut self, import_name: &String) {
+        self.import_name = MyPath::new(import_name);
+    }
+
+    pub fn insert_parent_mod_tree_for_fn_struct_enum_union_trait(
+        &mut self,
+        parent_mod_tree: &String,
+    ) {
+        let complete_name = parent_mod_tree.clone() + "::" + &self.name;
+        self.complete_name = complete_name.clone();
+        self.insert_import_name(&complete_name);
+    }
+
     pub fn get_name(&self) -> String {
         self.name.clone()
+    }
+
+    pub fn get_import_name_depth(&self) -> i32 {
+        self.import_name.get_depth()
+    }
+
+    pub fn change_name_for_impl_struct_name(&mut self, mod_context: &Rc<RefCell<ModContext>>) {
+        let name = self.get_name();
+        let depth = self.get_import_name_depth();
+        if depth == 1 {
+            let new_name = mod_context
+                .borrow()
+                .get_struct_enum_union_name_from_syntax(&name);
+            self.name = new_name.name;
+            self.complete_name = new_name.complete_name;
+            self.import_name = new_name.import_name;
+        }
+        // println!("{:#?}", impl_item.get_struct_name());
+        else {
+            let mut directly_use_tree = MyPath::new(&mod_context.borrow().get_mod_name());
+            let original_path_string = self.import_name.to_string();
+            if self.import_name.get_directly_use_tree(
+                &self.name,
+                &original_path_string,
+                mod_context,
+                &mut directly_use_tree,
+            ) {
+                self.import_name = directly_use_tree;
+            }
+        }
+    }
+
+    pub fn change_name_for_impl_trait_name(&mut self, mod_context: &Rc<RefCell<ModContext>>) {
+        let name = self.get_name();
+        let depth = self.get_import_name_depth();
+        if depth == 1 {
+            let new_name = mod_context.borrow().get_trait_name_from_syntax(&name);
+            self.name = new_name.name;
+            self.complete_name = new_name.complete_name;
+            self.import_name = new_name.import_name;
+        }
+        // println!("{:#?}", impl_item.get_struct_name());
+        else {
+            let mut directly_use_tree = MyPath::new(&mod_context.borrow().get_mod_name());
+            let original_path_string = self.import_name.to_string();
+            if self.import_name.get_directly_use_tree(
+                &self.name,
+                &original_path_string,
+                mod_context,
+                &mut directly_use_tree,
+            ) {
+                self.import_name = directly_use_tree;
+            }
+        }
     }
 }
 
@@ -126,11 +394,15 @@ impl FunctionItem {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConstItem {
     item: Option<ItemConst>,
+    visibility: MyVisibility,
 }
 
 impl ConstItem {
     pub fn new() -> Self {
-        ConstItem { item: None }
+        ConstItem {
+            item: None,
+            visibility: MyVisibility::Pri,
+        }
     }
 
     pub fn insert_item(&mut self, item: &ItemConst) {
@@ -144,16 +416,24 @@ impl ConstItem {
     pub fn to_item(&self) -> Item {
         Item::Const(self.item.clone().unwrap())
     }
+
+    pub fn insert_visibility(&mut self, visibility: MyVisibility) {
+        self.visibility = visibility;
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TraitAliasItem {
     item: Option<ItemTraitAlias>,
+    visibility: MyVisibility,
 }
 
 impl TraitAliasItem {
     pub fn new() -> Self {
-        TraitAliasItem { item: None }
+        TraitAliasItem {
+            item: None,
+            visibility: MyVisibility::Pri,
+        }
     }
 
     pub fn insert_item(&mut self, item: &ItemTraitAlias) {
@@ -167,16 +447,24 @@ impl TraitAliasItem {
     pub fn to_item(&self) -> Item {
         Item::TraitAlias(self.item.clone().unwrap())
     }
+
+    pub fn insert_visibility(&mut self, visibility: MyVisibility) {
+        self.visibility = visibility;
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct UseItem {
     item: Option<ItemUse>,
+    visibility: MyVisibility,
 }
 
 impl UseItem {
     pub fn new() -> Self {
-        UseItem { item: None }
+        UseItem {
+            item: None,
+            visibility: MyVisibility::Pri,
+        }
     }
 
     pub fn insert_item(&mut self, item: &ItemUse) {
@@ -190,6 +478,10 @@ impl UseItem {
     pub fn to_item(&self) -> Item {
         Item::Use(self.item.clone().unwrap())
     }
+
+    pub fn insert_visibility(&mut self, visibility: MyVisibility) {
+        self.visibility = visibility;
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -199,6 +491,7 @@ pub struct ModItem {
     item: Option<ItemMod>,
     // inline: bool,
     inside_items: Vec<Item>,
+    visibility: MyVisibility,
 }
 
 impl ModItem {
@@ -208,6 +501,7 @@ impl ModItem {
             file_name: None,
             item: None,
             inside_items: Vec::new(),
+            visibility: MyVisibility::Pri,
         }
     }
 
@@ -260,16 +554,28 @@ impl ModItem {
         }
         Item::Mod(item.clone())
     }
+
+    pub fn insert_visibility(&mut self, visibility: MyVisibility) {
+        self.visibility = visibility;
+    }
+
+    pub fn get_visibility(&self) -> MyVisibility {
+        self.visibility.clone()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StaticItem {
     item: Option<ItemStatic>,
+    visibility: MyVisibility,
 }
 
 impl StaticItem {
     pub fn new() -> Self {
-        StaticItem { item: None }
+        StaticItem {
+            item: None,
+            visibility: MyVisibility::Pri,
+        }
     }
 
     pub fn insert_item(&mut self, item: &ItemStatic) {
@@ -283,16 +589,24 @@ impl StaticItem {
     pub fn to_item(&self) -> Item {
         Item::Static(self.item.clone().unwrap())
     }
+
+    pub fn insert_visibility(&mut self, visibility: MyVisibility) {
+        self.visibility = visibility;
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeItem {
     item: Option<ItemType>,
+    visibility: MyVisibility,
 }
 
 impl TypeItem {
     pub fn new() -> Self {
-        TypeItem { item: None }
+        TypeItem {
+            item: None,
+            visibility: MyVisibility::Pri,
+        }
     }
 
     pub fn insert_item(&mut self, item: &ItemType) {
@@ -306,6 +620,10 @@ impl TypeItem {
     pub fn to_item(&self) -> Item {
         Item::Type(self.item.clone().unwrap())
     }
+
+    pub fn insert_visibility(&mut self, visibility: MyVisibility) {
+        self.visibility = visibility;
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -316,6 +634,7 @@ pub struct FnItem {
     // has_items: bool,
     inside_items: Vec<Item>,
     // application: Applications,
+    visibility: MyVisibility,
 }
 
 impl FnItem {
@@ -327,6 +646,7 @@ impl FnItem {
             item: None,
             inside_items: Vec::new(),
             // application: Applications::new(),
+            visibility: MyVisibility::Pri,
         }
     }
 
@@ -370,6 +690,15 @@ impl FnItem {
         return self.inside_items.clone();
     }
 
+    pub fn insert_parent_mod_tree(&mut self, mod_tree: &String) {
+        self.fn_name
+            .insert_parent_mod_tree_for_fn_struct_enum_union_trait(mod_tree);
+    }
+
+    pub fn get_name(&self) -> String {
+        self.fn_name.get_name()
+    }
+
     // pub fn get_complete_function_name_in_file(&self) -> String {
     //     return self.complete_function_name_in_file.clone();
     // }
@@ -394,16 +723,24 @@ impl FnItem {
     pub fn to_item(&self) -> Item {
         Item::Fn(self.item.clone().unwrap())
     }
+
+    pub fn insert_visibility(&mut self, visibility: MyVisibility) {
+        self.visibility = visibility;
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct ImplTypeItem {
     item: Option<ImplItemType>,
+    visibility: MyVisibility,
 }
 
 impl ImplTypeItem {
     pub fn new() -> Self {
-        ImplTypeItem { item: None }
+        ImplTypeItem {
+            item: None,
+            visibility: MyVisibility::Pri,
+        }
     }
 
     pub fn insert_item(&mut self, item: &ImplItemType) {
@@ -413,16 +750,24 @@ impl ImplTypeItem {
     pub fn get_item(&self) -> ImplItemType {
         self.item.clone().unwrap()
     }
+
+    pub fn insert_visibility(&mut self, visibility: MyVisibility) {
+        self.visibility = visibility;
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct ImplConstItem {
     item: Option<ImplItemConst>,
+    visibility: MyVisibility,
 }
 
 impl ImplConstItem {
     pub fn new() -> Self {
-        ImplConstItem { item: None }
+        ImplConstItem {
+            item: None,
+            visibility: MyVisibility::Pri,
+        }
     }
 
     pub fn insert_item(&mut self, item: &ImplItemConst) {
@@ -431,6 +776,10 @@ impl ImplConstItem {
 
     pub fn get_item(&self) -> ImplItemConst {
         self.item.clone().unwrap()
+    }
+
+    pub fn insert_visibility(&mut self, visibility: MyVisibility) {
+        self.visibility = visibility;
     }
 }
 
@@ -441,6 +790,7 @@ pub struct ImplFnItem {
     item: Option<ImplItemFn>,
     // has_items: bool,
     inside_items: Vec<Item>,
+    visibility: MyVisibility,
 }
 
 impl ImplFnItem {
@@ -450,6 +800,7 @@ impl ImplFnItem {
             complete_name_in_file: String::new(),
             item: None,
             inside_items: Vec::new(),
+            visibility: MyVisibility::Pri,
         }
     }
 
@@ -492,6 +843,10 @@ impl ImplFnItem {
     pub fn get_item(&self) -> ImplItemFn {
         self.item.clone().unwrap()
     }
+
+    pub fn insert_visibility(&mut self, visibility: MyVisibility) {
+        self.visibility = visibility;
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -528,8 +883,27 @@ impl ImplItem {
         self.struct_name = Name::new(struct_name);
     }
 
+    pub fn insert_struct_import_name(&mut self, import_name: &String) {
+        self.struct_name.insert_import_name(import_name);
+    }
+
+    pub fn change_struct_name(&mut self, name: &Name) {
+        self.struct_name = name.clone();
+    }
+
     pub fn insert_trait_name(&mut self, trait_name: &String) {
         self.trait_name = Some(Name::new(trait_name));
+    }
+
+    pub fn insert_trait_import_name(&mut self, import_name: &String) {
+        self.trait_name
+            .as_mut()
+            .unwrap()
+            .insert_import_name(import_name);
+    }
+
+    pub fn change_trait_name(&mut self, name: &Name) {
+        self.trait_name = Some(name.clone());
     }
 
     pub fn insert_item(&mut self, item: &ItemImpl) {
@@ -586,6 +960,14 @@ impl ImplItem {
         &self.functions
     }
 
+    pub fn get_struct_name(&self) -> &Name {
+        &self.struct_name
+    }
+
+    pub fn get_trait_name(&self) -> &Option<Name> {
+        &self.trait_name
+    }
+
     // pub fn insert_applications(&mut self, applications: &Vec<String>) {
     //     self.applications.insert_applications(applications);
     // }
@@ -616,6 +998,7 @@ pub struct StructItem {
     struct_name: Name,
     item: Option<ItemStruct>,
     // applications: Applications,
+    visibility: MyVisibility,
 }
 
 impl StructItem {
@@ -624,6 +1007,7 @@ impl StructItem {
             struct_name: Name::none(),
             item: None,
             // applications: Applications::new(),
+            visibility: MyVisibility::Pri,
         }
     }
 
@@ -637,6 +1021,23 @@ impl StructItem {
 
     pub fn to_item(&self) -> Item {
         Item::Struct(self.item.clone().unwrap())
+    }
+
+    pub fn insert_visibility(&mut self, visibility: MyVisibility) {
+        self.visibility = visibility;
+    }
+
+    pub fn insert_parent_mod_tree(&mut self, mod_tree: &String) {
+        self.struct_name
+            .insert_parent_mod_tree_for_fn_struct_enum_union_trait(mod_tree);
+    }
+
+    pub fn get_struct_name(&self) -> &Name {
+        &self.struct_name
+    }
+
+    pub fn get_name(&self) -> String {
+        self.struct_name.get_name()
     }
 
     // pub fn insert_applications(&mut self, applications: &Vec<String>) {
@@ -661,6 +1062,7 @@ pub struct EnumItem {
     enum_name: Name,
     item: Option<ItemEnum>,
     // applications: Applications,
+    visibility: MyVisibility,
 }
 
 impl EnumItem {
@@ -669,6 +1071,7 @@ impl EnumItem {
             enum_name: Name::none(),
             item: None,
             // applications: Applications::new(),
+            visibility: MyVisibility::Pri,
         }
     }
 
@@ -682,6 +1085,23 @@ impl EnumItem {
 
     pub fn to_item(&self) -> Item {
         Item::Enum(self.item.clone().unwrap())
+    }
+
+    pub fn insert_visibility(&mut self, visibility: MyVisibility) {
+        self.visibility = visibility;
+    }
+
+    pub fn insert_parent_mod_tree(&mut self, mod_tree: &String) {
+        self.enum_name
+            .insert_parent_mod_tree_for_fn_struct_enum_union_trait(mod_tree);
+    }
+
+    pub fn get_name(&self) -> String {
+        self.enum_name.get_name()
+    }
+
+    pub fn get_enum_name(&self) -> &Name {
+        &self.enum_name
     }
 
     // pub fn insert_applications(&mut self, applications: &Vec<String>) {
@@ -706,6 +1126,7 @@ pub struct UnionItem {
     union_name: Name,
     item: Option<ItemUnion>,
     // applications: Applications,
+    visibility: MyVisibility,
 }
 
 impl UnionItem {
@@ -714,6 +1135,7 @@ impl UnionItem {
             union_name: Name::none(),
             item: None,
             // applications: Applications::new(),
+            visibility: MyVisibility::Pri,
         }
     }
 
@@ -727,6 +1149,23 @@ impl UnionItem {
 
     pub fn to_item(&self) -> Item {
         Item::Union(self.item.clone().unwrap())
+    }
+
+    pub fn insert_visibility(&mut self, visibility: MyVisibility) {
+        self.visibility = visibility;
+    }
+
+    pub fn insert_parent_mod_tree(&mut self, mod_tree: &String) {
+        self.union_name
+            .insert_parent_mod_tree_for_fn_struct_enum_union_trait(mod_tree);
+    }
+
+    pub fn get_name(&self) -> String {
+        self.union_name.get_name()
+    }
+
+    pub fn get_union_name(&self) -> &Name {
+        &self.union_name
     }
 
     // pub fn insert_applications(&mut self, applications: &Vec<String>) {
@@ -852,6 +1291,7 @@ pub struct TraitItem {
     consts: Vec<TraitConstItem>,
     functions: Vec<TraitFnItem>,
     // applications: Applications,
+    visibility: MyVisibility,
 }
 
 impl TraitItem {
@@ -863,6 +1303,7 @@ impl TraitItem {
             consts: Vec::new(),
             functions: Vec::new(),
             // applications: Applications::new(),
+            visibility: MyVisibility::Pri,
         }
     }
 
@@ -886,7 +1327,11 @@ impl TraitItem {
         self.functions.push(item.clone());
     }
 
-    pub fn get_trait_name(&self) -> String {
+    pub fn get_trait_name(&self) -> &Name {
+        &self.trait_name
+    }
+
+    pub fn get_trait_name_str(&self) -> String {
         return self.trait_name.get_name();
     }
 
@@ -924,6 +1369,19 @@ impl TraitItem {
         &self.functions
     }
 
+    pub fn insert_visibility(&mut self, visibility: MyVisibility) {
+        self.visibility = visibility;
+    }
+
+    pub fn insert_parent_mod_tree(&mut self, mod_tree: &String) {
+        self.trait_name
+            .insert_parent_mod_tree_for_fn_struct_enum_union_trait(mod_tree);
+    }
+
+    pub fn get_name(&self) -> String {
+        self.trait_name.get_name()
+    }
+
     // pub fn insert_applications(&mut self, applications: &Vec<String>) {
     //     self.applications.insert_applications(applications);
     // }
@@ -944,16 +1402,56 @@ impl TraitItem {
 #[derive(Debug, Clone)]
 pub struct UseTree {
     use_name: String,
-    alias_name: String,
+    alias_name: Option<String>,
     use_tree: MyPath,
+    visibility: MyVisibility,
 }
 
 impl UseTree {
-    pub fn new(use_name: String, use_tree: String, alias_name: String) -> Self {
+    pub fn new(
+        use_name: String,
+        use_tree: String,
+        alias_name: Option<String>,
+        visibility: MyVisibility,
+    ) -> Self {
         UseTree {
             use_name: use_name,
             alias_name: alias_name,
             use_tree: MyPath::new(&use_tree),
+            visibility: visibility,
+        }
+    }
+
+    pub fn insert_visibility(&mut self, visibility: &MyVisibility) {
+        self.visibility = visibility.clone();
+    }
+
+    pub fn get_visibility(&self) -> &MyVisibility {
+        &self.visibility
+    }
+
+    pub fn get_alias(&self) -> &Option<String> {
+        &self.alias_name
+    }
+
+    pub fn get_use_tree(&self) -> &MyPath {
+        &self.use_tree
+    }
+
+    pub fn get_name(&self) -> &String {
+        &self.use_name
+    }
+
+    pub fn change_use_tree(&mut self, mod_context: &Rc<RefCell<ModContext>>) {
+        let mut directly_use_tree = MyPath::new(&mod_context.borrow().get_mod_name());
+        let original_path_string = self.use_tree.to_string();
+        if self.use_tree.get_directly_use_tree(
+            &self.use_name,
+            &original_path_string,
+            mod_context,
+            &mut directly_use_tree,
+        ) {
+            self.use_tree = directly_use_tree;
         }
     }
 }

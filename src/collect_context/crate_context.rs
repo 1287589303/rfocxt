@@ -10,7 +10,10 @@ use std::{
 use syn::parse_file;
 use toml::Value;
 
-use super::mod_context::{ModContext, ModInfo, ModModInfo};
+use super::{
+    items_context::MyVisibility,
+    mod_context::{ModContext, ModInfo, ModModInfo},
+};
 
 #[derive(Debug, Clone)]
 pub struct CrateContext {
@@ -79,6 +82,7 @@ impl CrateContext {
             mod_mod_info.insert_file_path(entry_file_path);
             mod_mod_info
                 .insert_parent_directory_path(&entry_file_path.parent().unwrap().to_path_buf());
+            mod_mod_info.insert_visibility(MyVisibility::PubT);
             let mod_info = ModInfo::Mod(mod_mod_info);
             let mod_context = ModContext::new();
             mod_context.borrow_mut().insert_mod_info(&mod_info);
@@ -88,6 +92,27 @@ impl CrateContext {
                 &Some(Rc::clone(&mod_context)),
             );
             self.main_mod_contexts.push(mod_context);
+        }
+        if self.entry_file_paths.len() == 2 {
+            self.main_mod_contexts[0]
+                .borrow_mut()
+                .add_use_mod(&self.main_mod_contexts[1]);
+        }
+    }
+
+    fn change_impl_name(&mut self) {}
+
+    pub fn change_all_name(&mut self) {
+        for mod_context in self.main_mod_contexts.iter_mut() {
+            mod_context
+                .borrow_mut()
+                .change_fn_struct_enum_union_trait_name();
+        }
+        for mod_context in self.main_mod_contexts.iter_mut() {
+            ModContext::change_use_trees_recursively(&mod_context);
+        }
+        for mod_context in self.main_mod_contexts.iter_mut() {
+            ModContext::change_impl_name_recursively(&mod_context);
         }
     }
 

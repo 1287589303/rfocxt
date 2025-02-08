@@ -104,7 +104,7 @@ fn current_crate() -> cargo_metadata::Package {
     package
 }
 
-fn rbrinfo() -> Command {
+fn call_chain() -> Command {
     let mut path = std::env::current_exe().expect("current executable path invalid");
     path.set_file_name("call-chain");
     Command::new(path)
@@ -234,7 +234,7 @@ fn in_cargo_mir_checker() {
 // And sets the environment variable `MIR_CHECKER_BE_RUSTC`
 // if `mir-checker` is going to analyze crates that are dependencies
 fn inside_cargo_rustc() {
-    let mut cmd = rbrinfo();
+    let mut cmd = call_chain();
     cmd.args(std::env::args().skip(2)); // skip `cargo-mir-checker rustc`
 
     // Add sysroot
