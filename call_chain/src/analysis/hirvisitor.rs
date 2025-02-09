@@ -5,7 +5,7 @@ use rustc_hir::intravisit::{self, Visitor};
 use rustc_hir::{self, BodyId, FnDecl};
 use rustc_middle::hir::map::Map;
 use rustc_middle::hir::nested_filter;
-use rustc_middle::mir::BasicBlocks;
+use rustc_middle::mir::{BasicBlock, BasicBlockData, BasicBlocks, LocalDecl, LocalDecls};
 use rustc_middle::ty::TyCtxt;
 use rustc_span::symbol::sym;
 use std::collections::{HashMap, HashSet};
@@ -28,7 +28,8 @@ pub struct VisitorData<'tcx> {
     pub mod_info: ModInfo,
     pub visible: bool,
     pub fn_source: SourceInfo,
-    pub basic_blocks: BasicBlocks<'tcx>,
+    pub basic_blocks: Vec<BasicBlockData<'tcx>>,
+    pub local_decls: Vec<LocalDecl<'tcx>>,
 }
 
 pub struct HirVisitor<'tcx> {
@@ -127,33 +128,33 @@ impl<'tcx> Visitor<'tcx> for HirVisitor<'tcx> {
         }
 
         // write function source code to file
-        let dir_path = format!("./rbrinfo/{}", id_str);
-        let file_path = format!("{}/code.rs", dir_path);
-        fs::create_dir_all(dir_path).unwrap();
-        let mut file = File::create(file_path).unwrap();
-        file.write_all(code.as_bytes()).unwrap();
+        // let dir_path = format!("./rbrinfo/{}", id_str);
+        // let file_path = format!("{}/code.rs", dir_path);
+        // fs::create_dir_all(dir_path).unwrap();
+        // let mut file = File::create(file_path).unwrap();
+        // file.write_all(code.as_bytes()).unwrap();
 
         let hir = self.hir_map.body(b);
         let mir = self.tcx.mir_built(id).borrow();
 
         // write HIR to file
-        let dir_path = format!("./rbrinfo/{}", id_str);
-        let file_path = format!("{}/hir.txt", dir_path);
-        fs::create_dir_all(dir_path).unwrap();
-        let mut file = File::create(file_path).unwrap();
-        let buf = format!("{:#?}", hir);
-        file.write_all(buf.as_bytes()).unwrap();
+        // let dir_path = format!("./rbrinfo/{}", id_str);
+        // let file_path = format!("{}/hir.txt", dir_path);
+        // fs::create_dir_all(dir_path).unwrap();
+        // let mut file = File::create(file_path).unwrap();
+        // let buf = format!("{:#?}", hir);
+        // file.write_all(buf.as_bytes()).unwrap();
 
         // tranverse HIR
-        let mut visitor = BranchVisitor::new(
-            self.tcx,
-            id_str.clone(),
-            fn_name.clone(),
-            fn_source.clone(),
-            self.tcx.typeck(hir.id().hir_id.owner),
-        );
-        intravisit::walk_body::<BranchVisitor>(&mut visitor, &hir);
-        visitor.output_map();
+        // let mut visitor = BranchVisitor::new(
+        //     self.tcx,
+        //     id_str.clone(),
+        //     fn_name.clone(),
+        //     fn_source.clone(),
+        //     self.tcx.typeck(hir.id().hir_id.owner),
+        // );
+        // intravisit::walk_body::<BranchVisitor>(&mut visitor, &hir);
+        // visitor.output_map();
 
         // check visibility
         let visible = self.is_accessible_from_crate(def_id, &fn_source);
@@ -183,7 +184,8 @@ impl<'tcx> Visitor<'tcx> for HirVisitor<'tcx> {
             mod_info: mod_info.clone(),
             visible,
             fn_source,
-            basic_blocks: mir.basic_blocks.clone(),
+            basic_blocks: mir.basic_blocks.raw.to_vec(),
+            local_decls: mir.local_decls.raw.to_vec(),
         };
 
         self.result.push(data);
