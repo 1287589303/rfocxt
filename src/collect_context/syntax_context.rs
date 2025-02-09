@@ -1,16 +1,21 @@
+use std::{cell::RefCell, rc::Rc};
+
 use prettyplease::unparse;
 use quote::quote;
 use syn::{
     parse2,
     visit::{self, Visit},
-    Attribute, Expr, Fields, GenericParam, Generics, Item, Lit, Meta, Path, Stmt, Type,
-    TypeParamBound, UseTree as SynUseTree,
+    Attribute, Expr, Item, Lit, Meta, Path, Stmt, Type, UseTree as SynUseTree, Visibility,
 };
 
-use super::items_context::{
-    ConstItem, EnumItem, FnItem, FunctionItem, ImplConstItem, ImplFnItem, ImplItem, ImplTypeItem,
-    ModItem, StaticItem, StructItem, TraitAliasItem, TraitConstItem, TraitFnItem, TraitItem,
-    TraitTypeItem, TypeItem, UnionItem, UseItem, UseTree,
+use super::{
+    items_context::{
+        ConstItem, EnumItem, FnItem, FunctionItem, ImplConstItem, ImplFnItem, ImplItem,
+        ImplTypeItem, ModItem, MyPath, MyVisibility, Name, StaticItem, StructItem, TraitAliasItem,
+        TraitConstItem, TraitFnItem, TraitItem, TraitTypeItem, TypeItem, UnionItem, UseItem,
+        UseTree,
+    },
+    mod_context::ModContext,
 };
 
 use syn::ImplItem as SynImplItem;
@@ -65,6 +70,25 @@ fn delete_doc_attributes(attrs: &Vec<Attribute>) -> Vec<Attribute> {
         }
     }
     no_doc_attrs
+}
+
+fn parse_visibility(visibility: &Visibility) -> MyVisibility {
+    match visibility {
+        Visibility::Public(_) => MyVisibility::PubT,
+        Visibility::Restricted(restricted) => {
+            if let Some(_) = restricted.in_token {
+                let path = &restricted.path;
+                let mut paths: Vec<String> = Vec::new();
+                for p in path.segments.iter() {
+                    paths.push(p.ident.to_string());
+                }
+                MyVisibility::PubI(MyPath::new(&paths.join("::")))
+            } else {
+                MyVisibility::PubS
+            }
+        }
+        Visibility::Inherited => MyVisibility::Pri,
+    }
 }
 
 // struct PathVisitor {
@@ -214,7 +238,12 @@ fn delete_doc_attributes(attrs: &Vec<Attribute>) -> Vec<Attribute> {
 //     }
 // }
 
-fn expand_use_tree(tree: &SynUseTree, expand_path: String, expanded_trees: &mut Vec<UseTree>) {
+fn expand_use_tree(
+    tree: &SynUseTree,
+    visibility: &MyVisibility,
+    expand_path: String,
+    expanded_trees: &mut Vec<UseTree>,
+) {
     match tree {
         SynUseTree::Path(use_path) => {
             let mut path_str = String::new();
@@ -223,7 +252,7 @@ fn expand_use_tree(tree: &SynUseTree, expand_path: String, expanded_trees: &mut 
             } else {
                 path_str = use_path.ident.to_string();
             }
-            expand_use_tree(&use_path.tree, path_str, expanded_trees);
+            expand_use_tree(&use_path.tree, visibility, path_str, expanded_trees);
         }
         SynUseTree::Name(use_name) => {
             let mut path_str = String::new();
@@ -232,7 +261,12 @@ fn expand_use_tree(tree: &SynUseTree, expand_path: String, expanded_trees: &mut 
             } else {
                 path_str = use_name.ident.to_string();
             }
-            let use_tree = UseTree::new(use_name.ident.to_string(), path_str, String::new());
+            let use_tree = UseTree::new(
+                use_name.ident.to_string(),
+                path_str,
+                None,
+                visibility.clone(),
+            );
             expanded_trees.push(use_tree);
         }
         SynUseTree::Glob(_) => {
@@ -242,7 +276,7 @@ fn expand_use_tree(tree: &SynUseTree, expand_path: String, expanded_trees: &mut 
             } else {
                 path_str = "*".to_string();
             }
-            let use_tree = UseTree::new("*".to_string(), path_str, String::new());
+            let use_tree = UseTree::new("*".to_string(), path_str, None, visibility.clone());
             expanded_trees.push(use_tree);
         }
         SynUseTree::Rename(use_rename) => {
@@ -252,7 +286,8 @@ fn expand_use_tree(tree: &SynUseTree, expand_path: String, expanded_trees: &mut 
                 let use_tree = UseTree::new(
                     use_rename.ident.to_string(),
                     path_str,
-                    use_rename.rename.to_string(),
+                    Some(use_rename.rename.to_string()),
+                    visibility.clone(),
                 );
                 expanded_trees.push(use_tree);
             } else {
@@ -260,14 +295,15 @@ fn expand_use_tree(tree: &SynUseTree, expand_path: String, expanded_trees: &mut 
                 let use_tree = UseTree::new(
                     use_rename.ident.to_string(),
                     path_str,
-                    use_rename.rename.to_string(),
+                    Some(use_rename.rename.to_string()),
+                    visibility.clone(),
                 );
                 expanded_trees.push(use_tree);
             }
         }
         SynUseTree::Group(use_group) => {
             for item in use_group.items.iter() {
-                expand_use_tree(item, expand_path.clone(), expanded_trees);
+                expand_use_tree(item, visibility, expand_path.clone(), expanded_trees);
             }
         }
     }
@@ -320,6 +356,7 @@ impl SyntaxContext {
                     let mut modified_item_const = item_const.clone();
                     modified_item_const.attrs = delete_doc_attributes(&modified_item_const.attrs);
                     const_item.insert_item(&modified_item_const);
+                    const_item.insert_visibility(parse_visibility(&item_const.vis));
                     syntax_context.consts.push(const_item);
                 }
                 Item::TraitAlias(item_trait_alias) => {
@@ -328,6 +365,7 @@ impl SyntaxContext {
                     modified_item_trait_alias.attrs =
                         delete_doc_attributes(&modified_item_trait_alias.attrs);
                     trait_alias_item.insert_item(&modified_item_trait_alias);
+                    trait_alias_item.insert_visibility(parse_visibility(&item_trait_alias.vis));
                     syntax_context.trait_aliases.push(trait_alias_item);
                 }
                 Item::Use(item_use) => {
@@ -335,9 +373,16 @@ impl SyntaxContext {
                     let mut modified_item_use = item_use.clone();
                     modified_item_use.attrs = delete_doc_attributes(&modified_item_use.attrs);
                     use_item.insert_item(&modified_item_use);
+                    let visibility = parse_visibility(&item_use.vis);
+                    use_item.insert_visibility(visibility.clone());
                     syntax_context.uses.push(use_item);
                     let mut this_expanded_paths: Vec<UseTree> = Vec::new();
-                    expand_use_tree(&item_use.tree, String::new(), &mut this_expanded_paths);
+                    expand_use_tree(
+                        &item_use.tree,
+                        &visibility,
+                        String::new(),
+                        &mut this_expanded_paths,
+                    );
                     expanded_use_trees.extend(this_expanded_paths);
                 }
                 Item::Mod(item_mod) => {
@@ -369,6 +414,7 @@ impl SyntaxContext {
                             }
                         }
                     }
+                    mod_item.insert_visibility(parse_visibility(&item_mod.vis));
                     syntax_context.mods.push(mod_item);
                 }
                 Item::Static(item_static) => {
@@ -376,6 +422,7 @@ impl SyntaxContext {
                     let mut modified_item_static = item_static.clone();
                     modified_item_static.attrs = delete_doc_attributes(&modified_item_static.attrs);
                     static_item.insert_item(&modified_item_static);
+                    static_item.insert_visibility(parse_visibility(&item_static.vis));
                     syntax_context.statics.push(static_item);
                 }
                 Item::Type(item_type) => {
@@ -383,6 +430,7 @@ impl SyntaxContext {
                     let mut modified_item_type = item_type.clone();
                     modified_item_type.attrs = delete_doc_attributes(&modified_item_type.attrs);
                     type_item.insert_item(&modified_item_type);
+                    type_item.insert_visibility(parse_visibility(&item_type.vis));
                     syntax_context.types.push(type_item);
                 }
                 Item::Struct(item_struct) => {
@@ -391,6 +439,7 @@ impl SyntaxContext {
                     let mut modified_item_struct = item_struct.clone();
                     modified_item_struct.attrs = delete_doc_attributes(&modified_item_struct.attrs);
                     struct_item.insert_item(&modified_item_struct);
+                    struct_item.insert_visibility(parse_visibility(&item_struct.vis));
                     syntax_context.structs.push(struct_item);
                 }
                 Item::Enum(item_enum) => {
@@ -399,6 +448,7 @@ impl SyntaxContext {
                     let mut modified_item_enum = item_enum.clone();
                     modified_item_enum.attrs = delete_doc_attributes(&modified_item_enum.attrs);
                     enum_item.insert_item(&modified_item_enum);
+                    enum_item.insert_visibility(parse_visibility(&item_enum.vis));
                     syntax_context.enums.push(enum_item);
                 }
                 Item::Union(item_union) => {
@@ -407,6 +457,7 @@ impl SyntaxContext {
                     let mut modified_item_union = item_union.clone();
                     modified_item_union.attrs = delete_doc_attributes(&modified_item_union.attrs);
                     union_item.insert_item(&modified_item_union);
+                    union_item.insert_visibility(parse_visibility(&item_union.vis));
                     syntax_context.unions.push(union_item);
                 }
                 Item::Impl(item_impl) => {
@@ -418,11 +469,16 @@ impl SyntaxContext {
                     modified_item_impl.attrs = delete_doc_attributes(&modified_item_impl.attrs);
                     impl_item.insert_item(&modified_item_impl);
                     let mut struct_name = String::new();
+                    let mut import_names: Vec<String> = Vec::new();
                     let ty = *item_impl.self_ty.clone();
                     if let Type::Path(ty_path) = ty {
                         struct_name = ty_path.path.segments.last().unwrap().ident.to_string();
+                        for segment in ty_path.path.segments.iter() {
+                            import_names.push(segment.ident.to_string());
+                        }
                     }
                     impl_item.insert_struct_name(&struct_name);
+                    impl_item.insert_struct_import_name(&import_names.join("::"));
                     let mut trait_name = String::new();
                     if item_impl.trait_.clone() != None {
                         trait_name = item_impl
@@ -435,7 +491,12 @@ impl SyntaxContext {
                             .unwrap()
                             .ident
                             .to_string();
+                        let mut import_names: Vec<String> = Vec::new();
+                        for segment in item_impl.clone().trait_.unwrap().1.segments.iter() {
+                            import_names.push(segment.ident.to_string());
+                        }
                         impl_item.insert_trait_name(&trait_name);
+                        impl_item.insert_trait_import_name(&import_names.join("::"));
                     }
                     for item in item_impl.items.iter() {
                         match item {
@@ -445,6 +506,8 @@ impl SyntaxContext {
                                     delete_doc_attributes(&modified_item_const.attrs);
                                 let mut impl_const_item = ImplConstItem::new();
                                 impl_const_item.insert_item(&modified_item_const);
+                                impl_const_item
+                                    .insert_visibility(parse_visibility(&item_const.vis));
                                 impl_item.insert_const(&impl_const_item);
                             }
                             SynImplItem::Type(item_type) => {
@@ -453,6 +516,7 @@ impl SyntaxContext {
                                     delete_doc_attributes(&modified_item_type.attrs);
                                 let mut impl_type_item = ImplTypeItem::new();
                                 impl_type_item.insert_item(&modified_item_type);
+                                impl_type_item.insert_visibility(parse_visibility(&item_type.vis));
                                 impl_item.insert_type(&impl_type_item);
                             }
                             SynImplItem::Fn(item_fn) => {
@@ -471,6 +535,7 @@ impl SyntaxContext {
                                     }
                                 }
                                 impl_fn_item.insert_items(&inside_items);
+                                impl_fn_item.insert_visibility(parse_visibility(&item_fn.vis));
                                 impl_item.insert_function(&impl_fn_item);
                             }
                             _ => {}
@@ -492,6 +557,7 @@ impl SyntaxContext {
                         }
                     }
                     fn_item.insert_items(&inside_items);
+                    fn_item.insert_visibility(parse_visibility(&item_fn.vis));
                     syntax_context.functions.push(fn_item);
                 }
                 Item::Trait(item_trait) => {
@@ -542,6 +608,7 @@ impl SyntaxContext {
                             _ => {}
                         }
                     }
+                    trait_item.insert_visibility(parse_visibility(&item_trait.vis));
                     trait_item.insert_item(&modified_item_trait);
                     syntax_context.traits.push(trait_item);
                 }
@@ -614,6 +681,142 @@ impl SyntaxContext {
             }
         }
         all_in_file_function_names
+    }
+
+    pub fn change_fn_struct_enum_union_trait_name(&mut self, mod_tree: &String) {
+        for fn_item in self.functions.iter_mut() {
+            fn_item.insert_parent_mod_tree(mod_tree);
+        }
+        for struct_item in self.structs.iter_mut() {
+            struct_item.insert_parent_mod_tree(mod_tree);
+        }
+        for enum_item in self.enums.iter_mut() {
+            enum_item.insert_parent_mod_tree(mod_tree);
+        }
+        for union_item in self.unions.iter_mut() {
+            union_item.insert_parent_mod_tree(mod_tree);
+        }
+        for trait_item in self.traits.iter_mut() {
+            trait_item.insert_parent_mod_tree(mod_tree);
+        }
+    }
+
+    pub fn change_use_trees(&mut self, mod_context: &Rc<RefCell<ModContext>>) {
+        for use_tree in self.use_trees.iter_mut() {
+            use_tree.change_use_tree(mod_context);
+        }
+    }
+
+    pub fn get_pub_use(&self) -> Vec<UseTree> {
+        let mut pub_uses: Vec<UseTree> = Vec::new();
+        for use_tree in self.use_trees.iter() {
+            match use_tree.get_visibility() {
+                MyVisibility::Pri => {}
+                _ => {
+                    pub_uses.push(use_tree.clone());
+                }
+            }
+        }
+        pub_uses
+    }
+
+    pub fn has_fn_struct_enum_union_trait(&self, name: &String) -> bool {
+        let mut r = false;
+        for fn_item in self.functions.iter() {
+            if fn_item.get_name().eq(name) {
+                r = true;
+                return r;
+            }
+        }
+        for struct_item in self.structs.iter() {
+            if struct_item.get_name().eq(name) {
+                r = true;
+                return r;
+            }
+        }
+        for enum_item in self.enums.iter() {
+            if enum_item.get_name().eq(name) {
+                r = true;
+                return r;
+            }
+        }
+        for union_item in self.unions.iter() {
+            if union_item.get_name().eq(name) {
+                r = true;
+                return r;
+            }
+        }
+        for trait_item in self.traits.iter() {
+            if trait_item.get_name().eq(name) {
+                r = true;
+                return r;
+            }
+        }
+        return r;
+    }
+
+    pub fn change_impl_name(&mut self) {
+        for impl_item in self.impls.iter_mut() {
+            let name = impl_item.get_struct_name();
+            let struct_name = name.get_name();
+            let depth = name.get_import_name_depth();
+            let mut has_found = false;
+            if depth == 1 {
+                for struct_item in self.structs.iter() {
+                    if struct_item.get_name() == struct_name {
+                        impl_item.change_struct_name(struct_item.get_struct_name());
+                        has_found = true;
+                        break;
+                    }
+                }
+                if has_found {
+                    continue;
+                }
+                for enum_item in self.enums.iter() {
+                    if enum_item.get_name() == struct_name {
+                        impl_item.change_struct_name(enum_item.get_enum_name());
+                        has_found = true;
+                        break;
+                    }
+                }
+                if has_found {
+                    continue;
+                }
+                for union_item in self.unions.iter() {
+                    if union_item.get_name() == struct_name {
+                        impl_item.change_struct_name(union_item.get_union_name());
+                        has_found = true;
+                        break;
+                    }
+                }
+                if has_found {
+                    continue;
+                }
+                for use_tree in self.use_trees.iter() {
+                    if use_tree.get_alias().is_some() {
+                        let alias_name = use_tree.get_alias().as_ref().unwrap();
+                        if struct_name.eq(alias_name) {
+                            let mut use_tree_name = Name::new(use_tree.get_name());
+                            use_tree_name.insert_import_name(&use_tree.get_use_tree().to_string());
+                            impl_item.change_struct_name(&use_tree_name);
+                            has_found = true;
+                            break;
+                        }
+                    }
+                    if struct_name.eq(use_tree.get_name()) {
+                        let mut use_tree_name = Name::new(use_tree.get_name());
+                        use_tree_name.insert_import_name(&use_tree.get_use_tree().to_string());
+                        impl_item.change_struct_name(&use_tree_name);
+                        has_found = true;
+                        break;
+                    }
+                }
+                if has_found {
+                    continue;
+                }
+            }
+            println!("{:#?}", impl_item.get_struct_name());
+        }
     }
 
     // pub fn get_item(&self, item_name: &String) -> SyntaxContext {

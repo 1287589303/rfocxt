@@ -25,6 +25,7 @@ fn main() {
     });
     let mut crate_context = CrateContext::new(crate_path);
     crate_context.parse_crate();
+    crate_context.change_all_name();
     // crate_context.parse_all_context();
     crate_context.cout_in_one_file_for_test();
     crate_context.cout_all_mod_trees_in_on_file_for_test();

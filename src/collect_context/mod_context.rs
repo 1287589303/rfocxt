@@ -9,25 +9,30 @@ use std::{
 
 use syn::{parse_file, Item};
 
-use super::syntax_context::SyntaxContext;
+use super::{
+    items_context::{MyPath, MyVisibility, UseTree},
+    syntax_context::SyntaxContext,
+};
 
 #[derive(Debug, Clone)]
 pub struct ModModInfo {
     mod_name: String,
-    mod_tree: String,
+    mod_tree: MyPath,
     file_path: PathBuf,
     parent_directory_path: PathBuf,
     mod_file_directory_path: Option<PathBuf>,
+    visibility: MyVisibility,
 }
 
 impl ModModInfo {
     pub fn new() -> Self {
         ModModInfo {
             mod_name: String::new(),
-            mod_tree: String::new(),
+            mod_tree: MyPath::none(),
             file_path: PathBuf::new(),
             parent_directory_path: PathBuf::new(),
             mod_file_directory_path: None,
+            visibility: MyVisibility::Pri,
         }
     }
 
@@ -40,11 +45,13 @@ impl ModModInfo {
             eprintln!("Mod name is empty!");
             process::exit(6);
         }
+        let mut mod_tree = String::new();
         if parent_mod_tree.eq("") {
-            self.mod_tree = self.mod_name.clone();
+            mod_tree = self.mod_name.clone();
         } else {
-            self.mod_tree = parent_mod_tree.clone() + "::" + &self.mod_name;
+            mod_tree = parent_mod_tree.clone() + "::" + &self.mod_name;
         }
+        self.mod_tree = MyPath::new(&mod_tree);
     }
 
     pub fn insert_file_path(&mut self, file_path: &PathBuf) {
@@ -59,7 +66,11 @@ impl ModModInfo {
         self.mod_file_directory_path = Some(mod_file_directory_path.clone());
     }
 
-    fn get_mod_name(&self) -> String {
+    pub fn insert_visibility(&mut self, visibility: MyVisibility) {
+        self.visibility = visibility;
+    }
+
+    pub fn get_mod_name(&self) -> String {
         return self.mod_name.clone();
     }
 
@@ -67,7 +78,7 @@ impl ModModInfo {
         return self.parent_directory_path.clone();
     }
 
-    fn get_mod_tree(&self) -> String {
+    pub fn get_mod_tree(&self) -> MyPath {
         return self.mod_tree.clone();
     }
 }
@@ -75,14 +86,16 @@ impl ModModInfo {
 #[derive(Debug, Clone)]
 pub struct FunctionModInfo {
     function_name: String,
-    mod_tree: String,
+    mod_tree: MyPath,
+    visibility: MyVisibility,
 }
 
 impl FunctionModInfo {
     pub fn new() -> Self {
         FunctionModInfo {
             function_name: String::new(),
-            mod_tree: String::new(),
+            mod_tree: MyPath::none(),
+            visibility: MyVisibility::Pri,
         }
     }
 
@@ -95,18 +108,20 @@ impl FunctionModInfo {
             eprintln!("Mod name is empty!");
             process::exit(6);
         }
+        let mut mod_tree = String::new();
         if parent_mod_tree.eq("") {
-            self.mod_tree = self.function_name.clone();
+            mod_tree = self.function_name.clone();
         } else {
-            self.mod_tree = parent_mod_tree.clone() + "::" + &self.function_name;
+            mod_tree = parent_mod_tree.clone() + "::" + &self.function_name;
         }
+        self.mod_tree = MyPath::new(&mod_tree);
     }
 
     fn get_function_name(&self) -> String {
         return self.function_name.clone();
     }
 
-    fn get_mod_tree(&self) -> String {
+    fn get_mod_tree(&self) -> MyPath {
         return self.mod_tree.clone();
     }
 }
@@ -142,7 +157,7 @@ impl ModInfo {
         }
     }
 
-    fn get_mod_tree(&self) -> String {
+    fn get_mod_tree(&self) -> MyPath {
         match self {
             ModInfo::Mod(mod_mod_info) => {
                 return mod_mod_info.get_mod_tree();
@@ -161,6 +176,7 @@ pub struct ModContext {
     sub_mods: Vec<Rc<RefCell<ModContext>>>,
     parent_mod: Option<Rc<RefCell<ModContext>>>,
     crate_mod: Option<Rc<RefCell<ModContext>>>,
+    lib_mod: Option<Rc<RefCell<ModContext>>>,
 }
 
 impl fmt::Debug for ModContext {
@@ -181,7 +197,12 @@ impl ModContext {
             sub_mods: Vec::new(),
             parent_mod: None,
             crate_mod: None,
+            lib_mod: None,
         }))
+    }
+
+    pub fn add_use_mod(&mut self, lib_mod: &Rc<RefCell<ModContext>>) {
+        self.lib_mod = Some(Rc::clone(lib_mod));
     }
 
     pub fn parse_from_items(
@@ -196,7 +217,13 @@ impl ModContext {
         for inline_mod in inline_mods.iter() {
             let mut mod_mod_info = ModModInfo::new();
             mod_mod_info.insert_mod_name(&inline_mod.get_mod_name());
-            mod_mod_info.insert_parent_mod_tree(&parent.borrow().mod_info.get_mod_tree());
+            mod_mod_info
+                .insert_parent_mod_tree(&parent.borrow().mod_info.get_mod_tree().to_string());
+            let mut visibility = inline_mod.get_visibility();
+            if let MyVisibility::Pri = &visibility {
+                visibility = MyVisibility::PubS;
+            }
+            mod_mod_info.insert_visibility(visibility);
             let mod_info = ModInfo::Mod(mod_mod_info);
             let sub_mod = ModContext::new();
             sub_mod.borrow_mut().insert_mod_info(&mod_info);
@@ -209,21 +236,29 @@ impl ModContext {
             let mut function_mod_info = FunctionModInfo::new();
             function_mod_info
                 .insert_function_name(&&function_with_item.get_complete_function_name_in_file());
-            function_mod_info.insert_parent_mod_tree(&parent.borrow().mod_info.get_mod_tree());
+            function_mod_info
+                .insert_parent_mod_tree(&parent.borrow().mod_info.get_mod_tree().to_string());
             let mod_info = ModInfo::Fn(function_mod_info);
             let sub_mod = ModContext::new();
             sub_mod.borrow_mut().insert_mod_info(&mod_info);
             ModContext::parse_from_items(&sub_mod, &function_with_item.get_items(), crate_mod);
+            sub_mod.borrow_mut().parent_mod = Some(Rc::clone(parent));
             sub_mod.borrow_mut().crate_mod = Some(Rc::clone(crate_mod.as_ref().unwrap()));
             parent.borrow_mut().sub_mods.push(sub_mod);
         }
         for no_inline_mod in no_inline_mods.iter() {
             let mut mod_mod_info = ModModInfo::new();
             mod_mod_info.insert_mod_name(&no_inline_mod.get_mod_name());
-            mod_mod_info.insert_parent_mod_tree(&parent.borrow().mod_info.get_mod_tree());
+            mod_mod_info
+                .insert_parent_mod_tree(&parent.borrow().mod_info.get_mod_tree().to_string());
             mod_mod_info.insert_parent_directory_path(
                 &parent.borrow().mod_info.get_parent_directory_path(),
             );
+            let mut visibility = no_inline_mod.get_visibility();
+            if let MyVisibility::Pri = &visibility {
+                visibility = MyVisibility::PubS;
+            }
+            mod_mod_info.insert_visibility(visibility);
             let mut rs_file_name = String::new();
             let mut single_file_path = PathBuf::new();
             let mut mod_directory_path = PathBuf::new();
@@ -246,6 +281,7 @@ impl ModContext {
                     let sub_mod = ModContext::new();
                     sub_mod.borrow_mut().insert_mod_info(&mod_info);
                     ModContext::parse_from_items(&sub_mod, &syntax.items, crate_mod);
+                    sub_mod.borrow_mut().parent_mod = Some(Rc::clone(parent));
                     sub_mod.borrow_mut().crate_mod = Some(Rc::clone(crate_mod.as_ref().unwrap()));
                     parent.borrow_mut().sub_mods.push(sub_mod);
                 } else if fs::exists(&single_file_path).unwrap() {
@@ -259,6 +295,7 @@ impl ModContext {
                         let sub_mod = ModContext::new();
                         sub_mod.borrow_mut().insert_mod_info(&mod_info);
                         ModContext::parse_from_items(&sub_mod, &syntax.items, crate_mod);
+                        sub_mod.borrow_mut().parent_mod = Some(Rc::clone(parent));
                         sub_mod.borrow_mut().crate_mod =
                             Some(Rc::clone(crate_mod.as_ref().unwrap()));
                         parent.borrow_mut().sub_mods.push(sub_mod);
@@ -270,6 +307,7 @@ impl ModContext {
                         let sub_mod = ModContext::new();
                         sub_mod.borrow_mut().insert_mod_info(&mod_info);
                         ModContext::parse_from_items(&sub_mod, &syntax.items, crate_mod);
+                        sub_mod.borrow_mut().parent_mod = Some(Rc::clone(parent));
                         sub_mod.borrow_mut().crate_mod =
                             Some(Rc::clone(crate_mod.as_ref().unwrap()));
                         parent.borrow_mut().sub_mods.push(sub_mod);
@@ -307,6 +345,7 @@ impl ModContext {
                         let sub_mod = ModContext::new();
                         sub_mod.borrow_mut().insert_mod_info(&mod_info);
                         ModContext::parse_from_items(&sub_mod, &syntax.items, crate_mod);
+                        sub_mod.borrow_mut().parent_mod = Some(Rc::clone(parent));
                         sub_mod.borrow_mut().crate_mod =
                             Some(Rc::clone(crate_mod.as_ref().unwrap()));
                         parent.borrow_mut().sub_mods.push(sub_mod);
@@ -341,6 +380,7 @@ impl ModContext {
                             let sub_mod = ModContext::new();
                             sub_mod.borrow_mut().insert_mod_info(&mod_info);
                             ModContext::parse_from_items(&sub_mod, &syntax.items, crate_mod);
+                            sub_mod.borrow_mut().parent_mod = Some(Rc::clone(parent));
                             sub_mod.borrow_mut().crate_mod =
                                 Some(Rc::clone(crate_mod.as_ref().unwrap()));
                             parent.borrow_mut().sub_mods.push(sub_mod);
@@ -352,6 +392,7 @@ impl ModContext {
                             let sub_mod = ModContext::new();
                             sub_mod.borrow_mut().insert_mod_info(&mod_info);
                             ModContext::parse_from_items(&sub_mod, &syntax.items, crate_mod);
+                            sub_mod.borrow_mut().parent_mod = Some(Rc::clone(parent));
                             sub_mod.borrow_mut().crate_mod =
                                 Some(Rc::clone(crate_mod.as_ref().unwrap()));
                             parent.borrow_mut().sub_mods.push(sub_mod);
@@ -370,7 +411,7 @@ impl ModContext {
     }
 
     pub fn get_all_mod_trees(&self, mod_trees: &mut Vec<String>) {
-        mod_trees.push(self.mod_info.get_mod_tree());
+        mod_trees.push(self.mod_info.get_mod_tree().to_string());
         for sub_mod in self.sub_mods.iter() {
             sub_mod.borrow().get_all_mod_trees(mod_trees);
         }
@@ -380,10 +421,120 @@ impl ModContext {
         let single_function_names = self.syntax_context.get_all_in_file_function_names();
         let mod_tree = self.mod_info.get_mod_tree();
         for single_function_name in single_function_names.iter() {
-            function_names.push(mod_tree.clone() + "::" + single_function_name);
+            function_names.push(mod_tree.to_string() + "::" + single_function_name);
         }
         for sub_mod in self.sub_mods.iter() {
             sub_mod.borrow().get_complete_function_names(function_names);
+        }
+    }
+
+    pub fn change_fn_struct_enum_union_trait_name(&mut self) {
+        self.syntax_context
+            .change_fn_struct_enum_union_trait_name(&self.mod_info.get_mod_tree().to_string());
+        for sub_mod in self.sub_mods.iter_mut() {
+            sub_mod
+                .borrow_mut()
+                .change_fn_struct_enum_union_trait_name();
+        }
+    }
+
+    fn get_parent(this: &Rc<RefCell<ModContext>>, times: i32) -> Rc<RefCell<ModContext>> {
+        if !this.borrow().is_mod_mod() {
+            return ModContext::get_parent(this.borrow().parent_mod.as_ref().unwrap(), 0);
+        } else {
+            if times == 0 {
+                return ModContext::get_parent(this.borrow().parent_mod.as_ref().unwrap(), 1);
+            } else {
+                return Rc::clone(this);
+            }
+        }
+    }
+
+    pub fn get_parent_recursively(this: &Rc<RefCell<ModContext>>) -> Rc<RefCell<ModContext>> {
+        ModContext::get_parent(this, 0)
+    }
+
+    pub fn get_crate(&self) -> &Rc<RefCell<ModContext>> {
+        self.crate_mod.as_ref().unwrap()
+    }
+
+    pub fn get_sub_mods(&self) -> &Vec<Rc<RefCell<ModContext>>> {
+        &self.sub_mods
+    }
+
+    pub fn get_mod_name(&self) -> String {
+        match &self.mod_info {
+            ModInfo::Mod(mod_mod_info) => mod_mod_info.get_mod_name(),
+            ModInfo::Fn(fn_mod_info) => fn_mod_info.get_function_name(),
+        }
+    }
+
+    pub fn get_mod_tree(&self) -> MyPath {
+        match &self.mod_info {
+            ModInfo::Mod(mod_mod_info) => mod_mod_info.get_mod_tree(),
+            ModInfo::Fn(fn_mod_info) => fn_mod_info.get_mod_tree(),
+        }
+    }
+
+    pub fn get_pub_use(&self) -> Vec<UseTree> {
+        self.syntax_context.get_pub_use()
+    }
+
+    pub fn has_fn_struct_enum_union_trait(&self, name: &String) -> bool {
+        self.syntax_context.has_fn_struct_enum_union_trait(name)
+    }
+
+    fn insert_syntax_context(&mut self, syntax_context: &SyntaxContext) {
+        self.syntax_context = syntax_context.clone();
+    }
+
+    pub fn change_use_trees(this: &Rc<RefCell<ModContext>>) {
+        let mut syntax_context = this.borrow().syntax_context.clone();
+        syntax_context.change_use_trees(this);
+        this.borrow_mut().insert_syntax_context(&syntax_context);
+        let lib_mod = &this.borrow().lib_mod.clone();
+        if let Some(lib_mod) = lib_mod {
+            let mut syntax_context = this.borrow().syntax_context.clone();
+            syntax_context.change_use_trees(lib_mod);
+            this.borrow_mut().insert_syntax_context(&syntax_context);
+        }
+    }
+
+    pub fn change_use_trees_recursively(this: &Rc<RefCell<ModContext>>) {
+        ModContext::change_use_trees(this);
+        for sub_mod in this.borrow().sub_mods.iter() {
+            ModContext::change_use_trees_recursively(sub_mod);
+        }
+    }
+
+    pub fn is_mod_mod(&self) -> bool {
+        if let ModInfo::Mod(_) = self.mod_info {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    pub fn is_crate(&self) -> bool {
+        if let None = self.crate_mod {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    fn change_impl_name(mod_context: &Rc<RefCell<ModContext>>) {
+        let mut syntax_context = mod_context.borrow().syntax_context.clone();
+        syntax_context.change_impl_name();
+        mod_context
+            .borrow_mut()
+            .insert_syntax_context(&syntax_context);
+    }
+
+    pub fn change_impl_name_recursively(mod_context: &Rc<RefCell<ModContext>>) {
+        ModContext::change_impl_name(mod_context);
+        for sub_mod in mod_context.borrow().sub_mods.iter() {
+            ModContext::change_impl_name_recursively(sub_mod);
         }
     }
 
