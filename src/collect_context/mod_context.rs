@@ -7,10 +7,10 @@ use std::{
     rc::Rc,
 };
 
-use syn::{parse_file, Item};
+use syn::{parse_file, token::Else, Item};
 
 use super::{
-    items_context::{MyPath, MyVisibility, UseTree},
+    items_context::{MyPath, MyVisibility, Name, UseTree},
     syntax_context::SyntaxContext,
 };
 
@@ -525,7 +525,7 @@ impl ModContext {
 
     fn change_impl_name(mod_context: &Rc<RefCell<ModContext>>) {
         let mut syntax_context = mod_context.borrow().syntax_context.clone();
-        syntax_context.change_impl_name();
+        syntax_context.change_impl_name(mod_context);
         mod_context
             .borrow_mut()
             .insert_syntax_context(&syntax_context);
@@ -536,6 +536,14 @@ impl ModContext {
         for sub_mod in mod_context.borrow().sub_mods.iter() {
             ModContext::change_impl_name_recursively(sub_mod);
         }
+    }
+
+    pub fn get_struct_enum_union_name_from_syntax(&self, name: &String) -> Name {
+        self.syntax_context.get_struct_enum_union_name(name)
+    }
+
+    pub fn get_trait_name_from_syntax(&self, name: &String) -> Name {
+        self.syntax_context.get_trait_name(name)
     }
 
     // pub fn get_all_item(&self, item_name: &String, syntax_context: &mut SyntaxContext) {

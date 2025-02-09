@@ -589,8 +589,9 @@ impl SyntaxContext {
                                 if let Some(block) = &item_fn.default {
                                     let mut trait_fn_item = TraitFnItem::new();
                                     trait_fn_item.insert_fn_name(&item_fn.sig.ident.to_string());
-                                    trait_fn_item
-                                        .insert_complete_name_in_file(&trait_item.get_trait_name());
+                                    trait_fn_item.insert_complete_name_in_file(
+                                        &trait_item.get_trait_name_str(),
+                                    );
                                     let mut modified_item_fn = item_fn.clone();
                                     modified_item_fn.attrs =
                                         delete_doc_attributes(&modified_item_fn.attrs);
@@ -755,68 +756,80 @@ impl SyntaxContext {
         return r;
     }
 
-    pub fn change_impl_name(&mut self) {
+    pub fn change_impl_name(&mut self, mod_context: &Rc<RefCell<ModContext>>) {
         for impl_item in self.impls.iter_mut() {
-            let name = impl_item.get_struct_name();
-            let struct_name = name.get_name();
-            let depth = name.get_import_name_depth();
-            let mut has_found = false;
-            if depth == 1 {
-                for struct_item in self.structs.iter() {
-                    if struct_item.get_name() == struct_name {
-                        impl_item.change_struct_name(struct_item.get_struct_name());
-                        has_found = true;
-                        break;
-                    }
-                }
-                if has_found {
-                    continue;
-                }
-                for enum_item in self.enums.iter() {
-                    if enum_item.get_name() == struct_name {
-                        impl_item.change_struct_name(enum_item.get_enum_name());
-                        has_found = true;
-                        break;
-                    }
-                }
-                if has_found {
-                    continue;
-                }
-                for union_item in self.unions.iter() {
-                    if union_item.get_name() == struct_name {
-                        impl_item.change_struct_name(union_item.get_union_name());
-                        has_found = true;
-                        break;
-                    }
-                }
-                if has_found {
-                    continue;
-                }
-                for use_tree in self.use_trees.iter() {
-                    if use_tree.get_alias().is_some() {
-                        let alias_name = use_tree.get_alias().as_ref().unwrap();
-                        if struct_name.eq(alias_name) {
-                            let mut use_tree_name = Name::new(use_tree.get_name());
-                            use_tree_name.insert_import_name(&use_tree.get_use_tree().to_string());
-                            impl_item.change_struct_name(&use_tree_name);
-                            has_found = true;
-                            break;
-                        }
-                    }
-                    if struct_name.eq(use_tree.get_name()) {
-                        let mut use_tree_name = Name::new(use_tree.get_name());
-                        use_tree_name.insert_import_name(&use_tree.get_use_tree().to_string());
-                        impl_item.change_struct_name(&use_tree_name);
-                        has_found = true;
-                        break;
-                    }
-                }
-                if has_found {
-                    continue;
+            let mut name = impl_item.get_struct_name().clone();
+            name.change_name_for_impl_struct_name(mod_context);
+            impl_item.change_struct_name(&name);
+            let mut name = impl_item.get_trait_name().clone();
+            if let Some(_) = name {
+                let mut name = name.as_mut().unwrap();
+                name.change_name_for_impl_trait_name(mod_context);
+                impl_item.change_trait_name(name);
+            }
+        }
+    }
+
+    pub fn get_struct_enum_union_name(&self, name: &String) -> Name {
+        for struct_item in self.structs.iter() {
+            if struct_item.get_name().eq(name) {
+                return struct_item.get_struct_name().clone();
+            }
+        }
+        for enum_item in self.enums.iter() {
+            if enum_item.get_name().eq(name) {
+                return enum_item.get_enum_name().clone();
+            }
+        }
+        for union_item in self.unions.iter() {
+            if union_item.get_name().eq(name) {
+                return union_item.get_union_name().clone();
+            }
+        }
+        for use_tree in self.use_trees.iter() {
+            if use_tree.get_alias().is_some() {
+                let alias_name = use_tree.get_alias().as_ref().unwrap();
+                if name.eq(alias_name) {
+                    let mut use_tree_name = Name::new(use_tree.get_name());
+                    use_tree_name.insert_import_name(&use_tree.get_use_tree().to_string());
+                    return use_tree_name;
                 }
             }
-            println!("{:#?}", impl_item.get_struct_name());
         }
+        for use_tree in self.use_trees.iter() {
+            if name.eq(use_tree.get_name()) {
+                let mut use_tree_name = Name::new(use_tree.get_name());
+                use_tree_name.insert_import_name(&use_tree.get_use_tree().to_string());
+                return use_tree_name;
+            }
+        }
+        return Name::new(&"".to_string());
+    }
+
+    pub fn get_trait_name(&self, name: &String) -> Name {
+        for trait_item in self.traits.iter() {
+            if trait_item.get_name().eq(name) {
+                return trait_item.get_trait_name().clone();
+            }
+        }
+        for use_tree in self.use_trees.iter() {
+            if use_tree.get_alias().is_some() {
+                let alias_name = use_tree.get_alias().as_ref().unwrap();
+                if name.eq(alias_name) {
+                    let mut use_tree_name = Name::new(use_tree.get_name());
+                    use_tree_name.insert_import_name(&use_tree.get_use_tree().to_string());
+                    return use_tree_name;
+                }
+            }
+        }
+        for use_tree in self.use_trees.iter() {
+            if name.eq(use_tree.get_name()) {
+                let mut use_tree_name = Name::new(use_tree.get_name());
+                use_tree_name.insert_import_name(&use_tree.get_use_tree().to_string());
+                return use_tree_name;
+            }
+        }
+        return Name::new(&"".to_string());
     }
 
     // pub fn get_item(&self, item_name: &String) -> SyntaxContext {

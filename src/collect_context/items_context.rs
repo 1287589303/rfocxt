@@ -286,10 +286,54 @@ impl Name {
         self.import_name.get_depth()
     }
 
-    fn change_name_for_impl_struct_name_trait_name(
-        &mut self,
-        mod_context: &Rc<RefCell<ModContext>>,
-    ) {
+    pub fn change_name_for_impl_struct_name(&mut self, mod_context: &Rc<RefCell<ModContext>>) {
+        let name = self.get_name();
+        let depth = self.get_import_name_depth();
+        if depth == 1 {
+            let new_name = mod_context
+                .borrow()
+                .get_struct_enum_union_name_from_syntax(&name);
+            self.name = new_name.name;
+            self.complete_name = new_name.complete_name;
+            self.import_name = new_name.import_name;
+        }
+        // println!("{:#?}", impl_item.get_struct_name());
+        else {
+            let mut directly_use_tree = MyPath::new(&mod_context.borrow().get_mod_name());
+            let original_path_string = self.import_name.to_string();
+            if self.import_name.get_directly_use_tree(
+                &self.name,
+                &original_path_string,
+                mod_context,
+                &mut directly_use_tree,
+            ) {
+                self.import_name = directly_use_tree;
+            }
+        }
+    }
+
+    pub fn change_name_for_impl_trait_name(&mut self, mod_context: &Rc<RefCell<ModContext>>) {
+        let name = self.get_name();
+        let depth = self.get_import_name_depth();
+        if depth == 1 {
+            let new_name = mod_context.borrow().get_trait_name_from_syntax(&name);
+            self.name = new_name.name;
+            self.complete_name = new_name.complete_name;
+            self.import_name = new_name.import_name;
+        }
+        // println!("{:#?}", impl_item.get_struct_name());
+        else {
+            let mut directly_use_tree = MyPath::new(&mod_context.borrow().get_mod_name());
+            let original_path_string = self.import_name.to_string();
+            if self.import_name.get_directly_use_tree(
+                &self.name,
+                &original_path_string,
+                mod_context,
+                &mut directly_use_tree,
+            ) {
+                self.import_name = directly_use_tree;
+            }
+        }
     }
 }
 
@@ -843,6 +887,10 @@ impl ImplItem {
         self.struct_name.insert_import_name(import_name);
     }
 
+    pub fn change_struct_name(&mut self, name: &Name) {
+        self.struct_name = name.clone();
+    }
+
     pub fn insert_trait_name(&mut self, trait_name: &String) {
         self.trait_name = Some(Name::new(trait_name));
     }
@@ -852,6 +900,10 @@ impl ImplItem {
             .as_mut()
             .unwrap()
             .insert_import_name(import_name);
+    }
+
+    pub fn change_trait_name(&mut self, name: &Name) {
+        self.trait_name = Some(name.clone());
     }
 
     pub fn insert_item(&mut self, item: &ItemImpl) {
@@ -912,8 +964,8 @@ impl ImplItem {
         &self.struct_name
     }
 
-    pub fn change_struct_name(&mut self, struct_name: &Name) {
-        self.struct_name = struct_name.clone();
+    pub fn get_trait_name(&self) -> &Option<Name> {
+        &self.trait_name
     }
 
     // pub fn insert_applications(&mut self, applications: &Vec<String>) {
@@ -1275,7 +1327,11 @@ impl TraitItem {
         self.functions.push(item.clone());
     }
 
-    pub fn get_trait_name(&self) -> String {
+    pub fn get_trait_name(&self) -> &Name {
+        &self.trait_name
+    }
+
+    pub fn get_trait_name_str(&self) -> String {
         return self.trait_name.get_name();
     }
 

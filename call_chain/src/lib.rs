@@ -22,6 +22,9 @@ extern crate log;
 pub mod analysis {
     // Definitions of callbacks for rustc
     pub mod callback;
+    pub mod exporter;
+    pub mod hirvisitor;
+    pub mod sourceinfo;
 }
 
 // Useful utilities

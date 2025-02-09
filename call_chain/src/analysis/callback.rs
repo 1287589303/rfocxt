@@ -1,7 +1,5 @@
 use rustc_driver::Compilation;
 use rustc_hir::def;
-use rustc_hir::ExprKind;
-use rustc_hir::StmtKind;
 use rustc_interface::interface;
 use rustc_interface::Queries;
 use rustc_middle::ty::TyCtxt;

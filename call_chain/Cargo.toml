@@ -16,3 +16,4 @@ name = "call-chain"
 cargo_metadata = "0.18"
 serde = { version = "1.0.216", features = ["derive"] }
 serde_json = "1.0.134"
+syn = { version = "2.0.87", features = ["extra-traits", "full", "parsing", "visit", "visit-mut"] }
