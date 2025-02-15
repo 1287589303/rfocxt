@@ -6,13 +6,17 @@ use rustc_interface::Queries;
 use rustc_middle::mir::Operand;
 use rustc_middle::mir::TerminatorKind;
 use rustc_middle::ty;
+use rustc_middle::ty::GenericArgKind;
+use rustc_middle::ty::Ty;
 use rustc_middle::ty::TyCtxt;
+use rustc_middle::ty::TyKind;
 use std::collections::HashSet;
 use std::fs::create_dir_all;
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 
+use super::exporter::CallsAndTypes;
 use super::hirvisitor::HirVisitor;
 use super::hirvisitor::VisitorData;
 
@@ -65,6 +69,59 @@ impl rustc_driver::Callbacks for MirCheckerCallbacks {
     // }
 }
 
+fn collect_subtypes<'tcx>(ty: Ty<'tcx>, tcx: TyCtxt<'tcx>, result: &mut HashSet<Ty<'tcx>>) {
+    let ty = ty.peel_refs();
+    if !result.insert(ty) {
+        return;
+    }
+    result.insert(ty);
+
+    match ty.kind() {
+        // 处理结构体/枚举类型（ADT）
+        TyKind::Adt(adt, args) => {
+            // if !adt.generics().params.is_empty() {
+            //     let generic_ty =
+            //         tcx.mk_adt(
+            //             *adt,
+            //             tcx.mk_args_from_iter(adt.generics().params.iter().map(|param| {
+            //                 GenericArg::from(tcx.mk_ty_param(param.index, param.name))
+            //             })),
+            //         );
+            //     collect_subtypes(generic_ty, tcx, result);
+            // }
+            for arg in args.iter() {
+                if let GenericArgKind::Type(sub_ty) = arg.unpack() {
+                    collect_subtypes(sub_ty, tcx, result);
+                }
+            }
+        }
+
+        // 处理数组类型 [T; N]
+        TyKind::Array(sub_ty, _) => {
+            collect_subtypes(*sub_ty, tcx, result);
+        }
+
+        // 处理切片类型 [T]
+        TyKind::Slice(sub_ty) => {
+            collect_subtypes(*sub_ty, tcx, result);
+        }
+
+        // 处理原始指针类型 *const T/*mut T
+        TyKind::RawPtr(ty_mut, _) => {
+            collect_subtypes(*ty_mut, tcx, result);
+        }
+
+        // 处理元组类型 (T1, T2, ...)
+        TyKind::Tuple(sub_tys) => {
+            for sub_ty in sub_tys.iter() {
+                collect_subtypes(sub_ty, tcx, result);
+            }
+        }
+        // 处理其他类型...
+        _ => {}
+    }
+}
+
 impl MirCheckerCallbacks {
     fn run_analysis<'tcx, 'compiler>(&mut self, tcx: TyCtxt<'tcx>) {
         // let hir_krate = tcx.hir();
@@ -111,6 +168,7 @@ impl MirCheckerCallbacks {
                 local_decls,
             } = data;
             let mut calls: HashSet<String> = HashSet::new();
+            let mut tys: HashSet<Ty<'tcx>> = HashSet::new();
             let mut types: HashSet<String> = HashSet::new();
             for basic_block in basic_blocks {
                 if let TerminatorKind::Call {
@@ -130,27 +188,42 @@ impl MirCheckerCallbacks {
                     let call_string = &kind_string[..kind_string.find("(").unwrap()];
                     // println!("提取的函数调用：{}", call_string);
                     calls.insert(call_string.to_string());
+
+                    for arg in args.iter() {
+                        if let Operand::Constant(constant) = &arg.node {
+                            // let arg_type = constant.ty().peel_refs().to_string();
+                            // types.insert(arg_type);
+                            collect_subtypes(constant.ty(), tcx, &mut tys);
+                        }
+                    }
                 }
             }
-            println!("Calls:");
-            for call in calls.iter() {
-                println!("{:#?}", call);
-            }
-            for local_decl in local_decls {
-                let decl_type = local_decl.ty.peel_refs().to_string();
-                // println!("{:#?}", local_decl.ty.peel_refs().to_string());
-                types.insert(decl_type);
-            }
-            println!("Types:");
-            for a_type in types.iter() {
-                println!("{:#?}", a_type);
-            }
-            println!();
-            // let directory_path = "./hir";
-            // create_dir_all(&directory_path).unwrap();
-            // let file_path = PathBuf::from(&directory_path).join(format!("{}.txt", fn_name));
-            // let mut file = File::create(&file_path).unwrap();
-            // file.write_all(format!("{:#?}", hir).as_bytes()).unwrap();
+            // println!("{}", fn_name);
+            // println!("Calls:");
+            // for call in calls.iter() {
+            //     println!("{:#?}", call);
+            // }
+            // for local_decl in local_decls {
+            //     // let decl_type = local_decl.ty.peel_refs().to_string();
+            //     // println!("{:#?}", local_decl.ty.peel_refs().to_string());
+            //     // types.insert(decl_type);
+            //     collect_subtypes(local_decl.ty, tcx, &mut tys);
+            // }
+            // for ty in tys.iter() {
+            //     types.insert(ty.to_string());
+            // }
+            // println!("Types:");
+            // for a_type in types.iter() {
+            //     println!("{:#?}", a_type);
+            // }
+            // println!();
+            let calls_and_types = CallsAndTypes::new(&calls, &types);
+            let directory_path = "./rfocxt/callsandtypes";
+            create_dir_all(&directory_path).unwrap();
+            let file_path = PathBuf::from(&directory_path).join(format!("{}.json", fn_name));
+            let mut file = File::create(&file_path).unwrap();
+            file.write_all(serde_json::to_string(&calls_and_types).unwrap().as_bytes())
+                .unwrap();
         }
     }
 }

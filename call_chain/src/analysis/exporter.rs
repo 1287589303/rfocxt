@@ -176,3 +176,26 @@ impl Cond {
         }
     }
 }
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CallsAndTypes {
+    pub calls: Vec<String>,
+    pub types: Vec<String>,
+}
+
+impl CallsAndTypes {
+    pub fn new(calls: &HashSet<String>, types: &HashSet<String>) -> Self {
+        let mut calls_vec: Vec<String> = Vec::new();
+        for call in calls.iter() {
+            calls_vec.push(call.clone());
+        }
+        let mut types_vec: Vec<String> = Vec::new();
+        for a_type in types.iter() {
+            types_vec.push(a_type.clone());
+        }
+        CallsAndTypes {
+            calls: calls_vec,
+            types: types_vec,
+        }
+    }
+}
