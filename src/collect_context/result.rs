@@ -24,6 +24,7 @@ pub enum StructType {
     Struct(StructItem),
     Enum(EnumItem),
     Union(UnionItem),
+    // Trait(TraitItem),
 }
 
 #[derive(Debug, Clone)]

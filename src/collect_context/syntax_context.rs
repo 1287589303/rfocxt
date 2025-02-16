@@ -1,8 +1,8 @@
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
-    fs::File,
-    io::Read,
+    fs::{create_dir_all, File},
+    io::{Read, Write},
     path::PathBuf,
     rc::Rc,
 };
@@ -101,7 +101,7 @@ fn parse_visibility(visibility: &Visibility) -> MyVisibility {
     }
 }
 
-fn parse_callsandtypes(data: &mut CallsAndTypes, mod_trees: &Vec<String>) {
+fn add_new_calls_and_types(data: &mut CallsAndTypes, mod_trees: &Vec<String>) {
     let re_impl = Regex::new(r"<impl\s+([^>]+)>").unwrap();
     let re_as = Regex::new(r"<\s*([^>\s]+)\s+as\s+([^>\s]+)\s*>").unwrap();
     let mut new_calls: HashSet<String> = HashSet::new();
@@ -112,7 +112,8 @@ fn parse_callsandtypes(data: &mut CallsAndTypes, mod_trees: &Vec<String>) {
             let path = MyPath::new(&content);
             for mod_tree in mod_trees.iter() {
                 let mod_tree_path = MyPath::new(mod_tree);
-                let new_call = mod_tree_path.connect(&path);
+                let new_path = mod_tree_path.connect(&path).to_string();
+                let new_call = call.replace(&content, &new_path);
                 new_calls.insert(new_call.to_string());
             }
         }
@@ -121,16 +122,36 @@ fn parse_callsandtypes(data: &mut CallsAndTypes, mod_trees: &Vec<String>) {
             let path = MyPath::new(&content);
             for mod_tree in mod_trees.iter() {
                 let mod_tree_path = MyPath::new(mod_tree);
-                let new_type = mod_tree_path.connect(&path);
-                new_types.insert(new_type.to_string());
+                let new_path = mod_tree_path.connect(&path).to_string();
+                let new_call = call.replace(&content, &new_path);
+                new_calls.insert(new_call.to_string());
+                let new_call = call.replace(&content, " ");
+                new_calls.insert(new_call.to_string());
             }
             let content = caps[2].to_string();
             let path = MyPath::new(&content);
             for mod_tree in mod_trees.iter() {
                 let mod_tree_path = MyPath::new(mod_tree);
-                let new_type = mod_tree_path.connect(&path);
-                new_types.insert(new_type.to_string());
+                let new_path = mod_tree_path.connect(&path).to_string();
+                let new_call = call.replace(&content, &new_path);
+                new_calls.insert(new_call.to_string());
             }
+        }
+    }
+    for call in data.calls.iter() {
+        for mod_tree in mod_trees.iter() {
+            let mod_tree_path = MyPath::new(mod_tree);
+            let call_path = MyPath::new(call);
+            let new_call = mod_tree_path.connect(&call_path);
+            new_calls.insert(new_call.to_string());
+        }
+    }
+    for a_type in data.types.iter() {
+        for mod_tree in mod_trees.iter() {
+            let mod_tree_path = MyPath::new(mod_tree);
+            let type_path = MyPath::new(a_type);
+            let new_type = mod_tree_path.connect(&type_path);
+            new_types.insert(new_type.to_string());
         }
     }
     for new_call in new_calls {
@@ -143,6 +164,140 @@ fn parse_callsandtypes(data: &mut CallsAndTypes, mod_trees: &Vec<String>) {
             data.types.push(new_type);
         }
     }
+}
+
+fn get_syntax(
+    data: &CallsAndTypes,
+    syntax_context: &mut SyntaxContext,
+    fns: &HashMap<String, FnData>,
+    structs: &HashMap<String, StructData>,
+) {
+    for call in data.calls.iter() {
+        let fn_data = fns.get(call);
+        if let Some(fn_data) = fn_data {
+            match &fn_data.fn_type {
+                FnType::Fn(fn_item) => {
+                    if !syntax_context.functions.contains(&fn_item) {
+                        syntax_context.functions.push(fn_item.clone());
+                    }
+                }
+                FnType::ImplFn(impl_fn_item, impl_item) => {
+                    let mut has_impl = false;
+                    for has_impl_item in syntax_context.impls.iter_mut() {
+                        if has_impl_item.get_item().eq(&impl_item.get_item()) {
+                            has_impl_item.insert_function(&impl_fn_item);
+                            has_impl = true;
+                        }
+                    }
+                    if !has_impl {
+                        let mut impl_item = impl_item.clone();
+                        impl_item.insert_function(&impl_fn_item);
+                        syntax_context.impls.push(impl_item);
+                    }
+                    let struct_item_string =
+                        impl_item.get_struct_name().get_import_name().to_string();
+                    let struct_item = structs.get(&struct_item_string);
+                    if let Some(struct_item) = struct_item {
+                        match &struct_item.struct_type {
+                            StructType::Struct(struct_item) => {
+                                if !syntax_context.structs.contains(&struct_item) {
+                                    syntax_context.structs.push(struct_item.clone());
+                                }
+                            }
+                            StructType::Enum(enum_item) => {
+                                if !syntax_context.enums.contains(&enum_item) {
+                                    syntax_context.enums.push(enum_item.clone());
+                                }
+                            }
+                            StructType::Union(union_item) => {
+                                if !syntax_context.unions.contains(&union_item) {
+                                    syntax_context.unions.push(union_item.clone());
+                                }
+                            }
+                        }
+                    }
+                    // let trait_item_name = impl_item.get_trait_name();
+                    // if let Some(trait_item_name) = Some(trait_item_name) {
+
+                    // }
+                }
+                FnType::TraitFn(trait_fn_item, trait_item) => {
+                    let mut has_trait = false;
+                    for has_trait_item in syntax_context.traits.iter_mut() {
+                        if has_trait_item.get_item().eq(&trait_item.get_item()) {
+                            has_trait_item.insert_function(&trait_fn_item);
+                            has_trait = true;
+                        }
+                    }
+                    if !has_trait {
+                        let mut trait_item = trait_item.clone();
+                        trait_item.insert_function(&trait_fn_item);
+                        syntax_context.traits.push(trait_item);
+                    }
+                    // let trait_item_string =
+                    //     trait_item.get_trait_name().get_import_name().to_string();
+                    // let trait_item = structs.get(&trait_item_string);
+                    // if let Some(trait_item) = trait_item {
+                    //     match &trait_item.struct_type {
+                    //         // StructType::Struct(struct_item) => {
+                    //         //     if !syntax_context.structs.contains(&struct_item) {
+                    //         //         syntax_context.structs.push(struct_item.clone());
+                    //         //     }
+                    //         // }
+                    //         // StructType::Enum(enum_item) => {
+                    //         //     if !syntax_context.enums.contains(&enum_item) {
+                    //         //         syntax_context.enums.push(enum_item.clone());
+                    //         //     }
+                    //         // }
+                    //         // StructType::Union(union_item) => {
+                    //         //     if !syntax_context.unions.contains(&union_item) {
+                    //         //         syntax_context.unions.push(union_item.clone());
+                    //         //     }
+                    //         // }
+                    //         // StructType::Trait(trait_item) => {
+                    //         //     if !syntax_context.traits.contains(&trait_item) {
+                    //         //         syntax_context.traits.push(trait_item);
+                    //         //     }
+                    //         // }
+                    //     }
+                    // }
+                }
+            }
+        }
+    }
+    for a_type in data.types.iter() {
+        let type_data = structs.get(a_type);
+        if let Some(type_data) = type_data {
+            match &type_data.struct_type {
+                StructType::Struct(struct_item) => {
+                    if !syntax_context.structs.contains(&struct_item) {
+                        syntax_context.structs.push(struct_item.clone());
+                    }
+                }
+                StructType::Enum(enum_item) => {
+                    if !syntax_context.enums.contains(&enum_item) {
+                        syntax_context.enums.push(enum_item.clone());
+                    }
+                }
+                StructType::Union(union_item) => {
+                    if !syntax_context.unions.contains(&union_item) {
+                        syntax_context.unions.push(union_item.clone());
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn parse_callsandtypes(
+    data: &mut CallsAndTypes,
+    mod_trees: &Vec<String>,
+    syntax: &mut SyntaxContext,
+    fns: &HashMap<String, FnData>,
+    structs: &HashMap<String, StructData>,
+) {
+    add_new_calls_and_types(data, mod_trees);
+    get_syntax(data, syntax, fns, structs);
 }
 
 // struct PathVisitor {
@@ -823,6 +978,9 @@ impl SyntaxContext {
             }
             impl_item.change_function_name(mod_context);
         }
+        for trait_item in self.traits.iter_mut() {
+            trait_item.change_function_name();
+        }
     }
 
     pub fn get_struct_enum_union_name(&self, name: &String) -> Name {
@@ -1163,188 +1321,112 @@ impl SyntaxContext {
         for function_item in self.functions.iter() {
             let complete_function_name =
                 mod_tree.clone() + "::" + &function_item.get_complete_function_name_in_file();
-            let call_file =
-                output_path.join(String::from("callsandtypes") + &complete_function_name + ".rs");
-            let mut file = File::open(call_file).unwrap();
-            let mut contents = String::new();
-            file.read_to_string(&mut contents).unwrap();
-            let data: CallsAndTypes = serde_json::from_str(&contents).unwrap();
-            parse_callsandtypes(&mut data, mod_trees);
-            let mut syntax_context = SyntaxContext::new();
-            syntax_context.functions.push(function_item.clone());
-            for call in data.calls.iter() {
-                let fn_data = fns.get(call);
-                if let Some(fn_data) = fn_data {
-                    match fn_data.fn_type {
-                        FnType::Fn(fn_item) => {
-                            if !syntax_context.functions.contains(&fn_item) {
-                                syntax_context.functions.push(fn_item.clone());
-                            }
-                        }
-                        FnType::ImplFn(impl_fn_item, impl_item) => {
-                            let mut has_impl = false;
-                            for has_impl_item in syntax_context.impls.iter_mut() {
-                                if has_impl_item.get_item().eq(&impl_item.get_item()) {
-                                    has_impl_item.insert_function(&impl_fn_item);
-                                    has_impl = true;
-                                }
-                            }
-                            if !has_impl {
-                                let mut impl_item = impl_item.clone();
-                                impl_item.insert_function(&impl_fn_item);
-                                syntax_context.impls.push(impl_item);
-                            }
-                            let struct_item_string =
-                                impl_item.get_struct_name().get_import_name().to_string();
-                            let struct_item = structs.get(&struct_item_string);
-                            if let Some(struct_item) = struct_item {
-                                match struct_item.struct_type {
-                                    StructType::Struct(struct_item) => {
-                                        if !syntax_context.structs.contains(&struct_item) {
-                                            syntax_context.structs.push(struct_item);
-                                        }
-                                    }
-                                    StructType::Enum(enum_item) => {
-                                        if !syntax_context.enums.contains(&enum_item) {
-                                            syntax_context.enums.push(enum_item);
-                                        }
-                                    }
-                                    StructType::Union(union_item) => {
-                                        if !syntax_context.unions.contains(&union_item) {
-                                            syntax_context.unions.push(union_item);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        FnType::TraitFn(trait_fn_item, trait_item) => {}
-                    }
+            let call_file = output_path
+                .join(String::from("callsandtypes/") + &complete_function_name + ".json");
+            // println!("{}", call_file.to_string_lossy());
+            let mut file = File::open(call_file);
+            match file {
+                Ok(mut file) => {
+                    let mut contents = String::new();
+                    file.read_to_string(&mut contents).unwrap();
+                    let mut data: CallsAndTypes = serde_json::from_str(&contents).unwrap();
+                    let mut syntax_context = SyntaxContext::new();
+                    // syntax_context.functions.push(function_item.clone());
+                    data.calls.push(function_item.get_complete_name());
+                    parse_callsandtypes(&mut data, mod_trees, &mut syntax_context, fns, structs);
+                    let rs_file_name = complete_function_name.clone() + ".rs";
+                    let output_file_path = output_path.join(rs_file_name);
+                    let mut file = File::create(output_file_path).unwrap();
+                    file.write_all(syntax_context.to_string().as_bytes())
+                        .unwrap();
+
+                    let directory_path = output_path.join("new_callsandtypes");
+                    create_dir_all(&directory_path).unwrap();
+                    let file_path = PathBuf::from(&directory_path)
+                        .join(format!("{}.json", complete_function_name.clone()));
+                    let mut file = File::create(&file_path).unwrap();
+                    file.write_all(serde_json::to_string(&data).unwrap().as_bytes())
+                        .unwrap();
                 }
+                Err(_) => {}
             }
-            let rs_file_name = complete_function_name + ".rs";
-            let output_file_path = output_path.join(rs_file_name);
-            let mut file = File::create(output_file_path).unwrap();
-            file.write_all(syntax_context.to_string().as_bytes())
-                .unwrap();
         }
         for impl_item in self.impls.iter() {
-            for function_item in impl_item.get_functions().iter() {
+            for function_item in impl_item.get_fns().iter() {
                 let complete_function_name =
                     mod_tree.clone() + "::" + &function_item.get_complete_function_name_in_file();
-                let mut remain_applications: Vec<String> = Vec::new();
-                let mut already_applications: Vec<String> = Vec::new();
-                let struct_name = impl_item.get_struct_name();
-                remain_applications.push(struct_name);
-                let trait_name = impl_item.get_trait_name();
-                if let Some(trait_name) = trait_name {
-                    remain_applications.push(trait_name);
-                }
-                remain_applications.extend(function_item.get_applications());
-                let mut syntax_context = SyntaxContext::new();
-                while !remain_applications.is_empty() {
-                    let item_name = remain_applications.remove(0);
-                    if !already_applications.contains(&item_name) {
-                        already_applications.push(item_name.clone());
-                        let mut named_syntax_context = SyntaxContext::new();
-                        for main_mod_context in main_mod_contexts.iter() {
-                            main_mod_context.get_all_item(&item_name, &mut named_syntax_context);
-                        }
-                        syntax_context.extend_with_other(&named_syntax_context);
+                let call_file = output_path
+                    .join(String::from("callsandtypes/") + &complete_function_name + ".json");
+                let mut file = File::open(call_file);
+                match file {
+                    Ok(mut file) => {
+                        let mut contents = String::new();
+                        file.read_to_string(&mut contents).unwrap();
+                        let mut data: CallsAndTypes = serde_json::from_str(&contents).unwrap();
+                        let mut syntax_context = SyntaxContext::new();
+                        data.calls.push(function_item.get_complete_name());
+                        parse_callsandtypes(
+                            &mut data,
+                            mod_trees,
+                            &mut syntax_context,
+                            fns,
+                            structs,
+                        );
+                        let rs_file_name = complete_function_name.clone() + ".rs";
+                        let output_file_path = output_path.join(rs_file_name);
+                        let mut file = File::create(output_file_path).unwrap();
+                        file.write_all(syntax_context.to_string().as_bytes())
+                            .unwrap();
+
+                        let directory_path = output_path.join("new_callsandtypes");
+                        create_dir_all(&directory_path).unwrap();
+                        let file_path = PathBuf::from(&directory_path)
+                            .join(format!("{}.json", complete_function_name.clone()));
+                        let mut file = File::create(&file_path).unwrap();
+                        file.write_all(serde_json::to_string(&data).unwrap().as_bytes())
+                            .unwrap();
                     }
+                    Err(_) => {}
                 }
-                let traits = syntax_context.get_impl_traits();
-                for trait_name in traits.iter() {
-                    if !already_applications.contains(trait_name) {
-                        remain_applications.push(trait_name.clone());
-                    }
-                }
-                while !remain_applications.is_empty() {
-                    let item_name = remain_applications.remove(0);
-                    already_applications.push(item_name.clone());
-                    let mut named_syntax_context = SyntaxContext::new();
-                    for main_mod_context in main_mod_contexts.iter() {
-                        main_mod_context.get_all_item(&item_name, &mut named_syntax_context);
-                    }
-                    syntax_context.extend_with_other(&named_syntax_context);
-                }
-                // let structs = syntax_context.get_impl_structs();
-                // for struct_name in structs.iter() {
-                //     if !already_applications.contains(struct_name) {
-                //         remain_applications.push(struct_name.clone());
-                //     }
-                // }
-                // while !remain_applications.is_empty() {
-                //     let item_name = remain_applications.remove(0);
-                //     already_applications.push(item_name.clone());
-                //     let mut named_syntax_context = SyntaxContext::new();
-                //     for main_mod_context in main_mod_contexts.iter() {
-                //         main_mod_context.get_all_item(&item_name, &mut named_syntax_context);
-                //     }
-                //     syntax_context.extend_with_other(&named_syntax_context);
-                // }
-                let rs_file_name = complete_function_name + ".rs";
-                let output_file_path = output_path.join(rs_file_name);
-                let mut file = File::create(output_file_path).unwrap();
-                file.write_all(syntax_context.to_string().as_bytes())
-                    .unwrap();
             }
         }
         for trait_item in self.traits.iter() {
-            for function_item in trait_item.get_functions().iter() {
+            for function_item in trait_item.get_fns().iter() {
                 let complete_function_name =
                     mod_tree.clone() + "::" + &function_item.get_complete_function_name_in_file();
-                let mut remain_applications: Vec<String> = Vec::new();
-                let mut already_applications: Vec<String> = Vec::new();
-                let trait_name = trait_item.get_trait_name();
-                remain_applications.push(trait_name);
-                let mut syntax_context = SyntaxContext::new();
-                remain_applications.extend(function_item.get_applications());
-                while !remain_applications.is_empty() {
-                    let item_name = remain_applications.remove(0);
-                    if !already_applications.contains(&item_name) {
-                        already_applications.push(item_name.clone());
-                        let mut named_syntax_context = SyntaxContext::new();
-                        for main_mod_context in main_mod_contexts.iter() {
-                            main_mod_context.get_all_item(&item_name, &mut named_syntax_context);
-                        }
-                        syntax_context.extend_with_other(&named_syntax_context);
+                let call_file = output_path
+                    .join(String::from("callsandtypes/") + &complete_function_name + ".json");
+                let mut file = File::open(call_file);
+                match file {
+                    Ok(mut file) => {
+                        let mut contents = String::new();
+                        file.read_to_string(&mut contents).unwrap();
+                        let mut data: CallsAndTypes = serde_json::from_str(&contents).unwrap();
+                        let mut syntax_context = SyntaxContext::new();
+                        data.calls.push(function_item.get_complete_name());
+                        parse_callsandtypes(
+                            &mut data,
+                            mod_trees,
+                            &mut syntax_context,
+                            fns,
+                            structs,
+                        );
+                        let rs_file_name = complete_function_name.clone() + ".rs";
+                        let output_file_path = output_path.join(rs_file_name);
+                        let mut file = File::create(output_file_path).unwrap();
+                        file.write_all(syntax_context.to_string().as_bytes())
+                            .unwrap();
+
+                        let directory_path = output_path.join("new_callsandtypes");
+                        create_dir_all(&directory_path).unwrap();
+                        let file_path = PathBuf::from(&directory_path)
+                            .join(format!("{}.json", complete_function_name.clone()));
+                        let mut file = File::create(&file_path).unwrap();
+                        file.write_all(serde_json::to_string(&data).unwrap().as_bytes())
+                            .unwrap();
                     }
+                    Err(_) => {}
                 }
-                let traits = syntax_context.get_impl_traits();
-                for trait_name in traits.iter() {
-                    if !already_applications.contains(trait_name) {
-                        remain_applications.push(trait_name.clone());
-                    }
-                }
-                while !remain_applications.is_empty() {
-                    let item_name = remain_applications.remove(0);
-                    already_applications.push(item_name.clone());
-                    let mut named_syntax_context = SyntaxContext::new();
-                    for main_mod_context in main_mod_contexts.iter() {
-                        main_mod_context.get_all_item(&item_name, &mut named_syntax_context);
-                    }
-                    syntax_context.extend_with_other(&named_syntax_context);
-                }
-                // let structs = syntax_context.get_impl_structs();
-                // for struct_name in structs.iter() {
-                //     if !already_applications.contains(struct_name) {
-                //         remain_applications.push(struct_name.clone());
-                //     }
-                // }
-                // while !remain_applications.is_empty() {
-                //     let item_name = remain_applications.remove(0);
-                //     already_applications.push(item_name.clone());
-                //     let mut named_syntax_context = SyntaxContext::new();
-                //     for main_mod_context in main_mod_contexts.iter() {
-                //         main_mod_context.get_all_item(&item_name, &mut named_syntax_context);
-                //     }
-                //     syntax_context.extend_with_other(&named_syntax_context);
-                // }
-                let rs_file_name = complete_function_name + ".rs";
-                let output_file_path = output_path.join(rs_file_name);
-                let mut file = File::create(output_file_path).unwrap();
-                file.write_all(syntax_context.to_string().as_bytes())
-                    .unwrap();
             }
         }
     }

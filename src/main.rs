@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs::{self, File},
     io::Write,
     path::PathBuf,
@@ -38,8 +38,13 @@ fn main() {
     let mut crate_context = CrateContext::new(&crate_path);
     crate_context.parse_crate();
     crate_context.change_all_names();
-    let mut mod_trees: Vec<String> = Vec::new();
+    let mut mod_trees: HashSet<String> = HashSet::new();
     crate_context.cout_all_mod_trees_in_on_file_for_test(&mut mod_trees);
+    let mut mod_trees_vec: Vec<String> = Vec::new();
+    for mod_tree in mod_trees.iter() {
+        mod_trees_vec.push(mod_tree.clone());
+    }
+    let mod_trees = mod_trees_vec;
     let mut fns: HashMap<String, FnData> = HashMap::new();
     let mut structs: HashMap<String, StructData> = HashMap::new();
     crate_context.get_result(&mut fns, &mut structs);
@@ -48,11 +53,11 @@ fn main() {
     let output_path = crate_path.join("rfocxt/result.txt");
     fs::create_dir_all(output_path.parent().unwrap()).unwrap();
     let mut file = File::create(&output_path).unwrap();
-    file.write_all(format!("fns:\n{:#?}", fns).as_bytes())
+    file.write_all(format!("fns:\n{:#?}\n", fns).as_bytes())
         .unwrap();
     file.write_all(format!("structs:\n{:#?}", structs).as_bytes())
         .unwrap();
-    crate_context.parse_all_context();
+    crate_context.parse_all_context(&mod_trees, &fns, &structs);
     crate_context.cout_in_one_file_for_test();
     crate_context.cout_complete_function_name_in_on_file_for_test();
 }

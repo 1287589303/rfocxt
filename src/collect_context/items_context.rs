@@ -261,18 +261,45 @@ impl MyPath {
     }
 
     pub fn connect(&self, another_path: &MyPath) -> MyPath {
-        let mut another_path = another_path.clone();
-        let mut new_path = self.clone();
-        while let Some(path) = another_path.next {
-            new_path.down(&another_path.name);
-            let sub_path = *path.next.unwrap().clone();
-            another_path = sub_path;
+        let mut new_self = self.deep_copy();
+        let mut current = &mut new_self;
+
+        while let Some(ref mut next) = current.next {
+            current = next;
         }
-        if another_path.name != "" {
-            new_path.down(&another_path.name);
-        }
-        new_path
+
+        let new_another = another_path.deep_copy();
+        current.next = Some(Box::new(new_another));
+
+        new_self
     }
+
+    fn deep_copy(&self) -> MyPath {
+        MyPath {
+            name: self.name.clone(),
+            next: self.next.as_ref().map(|next| Box::new(next.deep_copy())),
+        }
+    }
+
+    // pub fn connect(&self, another_path: &MyPath) -> MyPath {
+    //     let mut another_path = another_path.clone();
+    //     let mut new_path = self.clone();
+    //     // println!("{}", self.to_string());
+    //     // println!("{}", another_path.to_string());
+    //     // println!();
+    //     while let Some(path) = another_path.next {
+    //         new_path.down(&another_path.name);
+    //         if let None = path.next {
+    //             break;
+    //         }
+    //         let sub_path = *path.next.unwrap().clone();
+    //         another_path = sub_path;
+    //     }
+    //     if another_path.name != "" {
+    //         new_path.down(&another_path.name);
+    //     }
+    //     new_path
+    // }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1399,6 +1426,16 @@ impl TraitFnItem {
     pub fn get_complete_name(&self) -> String {
         self.fn_name.get_import_name().to_string()
     }
+
+    pub fn change_name(&mut self, trait_name: &Name) {
+        let struct_path = " ";
+        let trait_path = trait_name.get_import_name();
+        let fn_path_string = format!("<{} as {}>", struct_path, trait_path.to_string())
+            + "::"
+            + &self.fn_name.get_name();
+        self.fn_name.insert_complete_name(&fn_path_string);
+        self.fn_name.insert_import_name(&fn_path_string);
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1504,6 +1541,16 @@ impl TraitItem {
         self.types.clear();
         self.consts.clear();
         self.functions.clear();
+    }
+
+    pub fn get_item(&self) -> &ItemTrait {
+        self.item.as_ref().unwrap()
+    }
+
+    pub fn change_function_name(&mut self) {
+        for function in self.functions.iter_mut() {
+            function.change_name(&self.trait_name);
+        }
     }
 
     // pub fn insert_applications(&mut self, applications: &Vec<String>) {

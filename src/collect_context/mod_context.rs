@@ -554,6 +554,9 @@ impl ModContext {
         structs: &mut HashMap<String, StructData>,
     ) {
         self.syntax_context.get_result(fns, structs);
+        for sub_mod in self.sub_mods.iter() {
+            sub_mod.borrow().get_result(fns, structs);
+        }
     }
 
     // pub fn get_all_item(&self, item_name: &String, syntax_context: &mut SyntaxContext) {
@@ -577,16 +580,21 @@ impl ModContext {
     pub fn get_all_context(
         &self,
         output_path: &PathBuf,
+        mod_trees: &Vec<String>,
         fns: &HashMap<String, FnData>,
         structs: &HashMap<String, StructData>,
     ) {
         self.syntax_context.get_context(
             output_path,
-            &self.mod_info.get_mod_tree(),
-            main_mod_contexts,
+            &self.mod_info.get_mod_tree().to_string(),
+            mod_trees,
+            fns,
+            structs,
         );
         for sub_mod in self.sub_mods.iter() {
-            sub_mod.borrow().get_all_context(output_path);
+            sub_mod
+                .borrow()
+                .get_all_context(output_path, mod_trees, fns, structs);
         }
     }
 }

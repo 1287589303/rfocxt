@@ -1,6 +1,6 @@
 use std::{
     cell::RefCell,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs::{self, read_to_string, File},
     io::Write,
     path::PathBuf,
@@ -120,13 +120,17 @@ impl CrateContext {
 
     pub fn parse_all_context(
         &self,
+        mod_trees: &Vec<String>,
         fns: &HashMap<String, FnData>,
         structs: &HashMap<String, StructData>,
     ) {
         for mod_context in self.main_mod_contexts.iter() {
-            mod_context
-                .borrow()
-                .get_all_context(&self.crate_path.join("focxt"));
+            mod_context.borrow().get_all_context(
+                &self.crate_path.join("rfocxt"),
+                mod_trees,
+                fns,
+                structs,
+            );
         }
     }
 
@@ -137,15 +141,15 @@ impl CrateContext {
         file.write_all(format!("{:#?}", self).as_bytes()).unwrap();
     }
 
-    pub fn cout_all_mod_trees_in_on_file_for_test(&self, out_mod_trees: &mut Vec<String>) {
+    pub fn cout_all_mod_trees_in_on_file_for_test(&self, out_mod_trees: &mut HashSet<String>) {
         let output_path = self.crate_path.join("rfocxt/mod_trees");
         fs::create_dir_all(&output_path).unwrap();
         let mut num = 0;
         for mod_context in self.main_mod_contexts.iter() {
             let mut mod_trees: Vec<String> = Vec::new();
             mod_context.borrow().get_all_mod_trees(&mut mod_trees);
-            for mod_tree in mod_trees {
-                out_mod_trees.push(mod_tree);
+            for mod_tree in mod_trees.iter() {
+                out_mod_trees.insert(mod_tree.clone());
             }
             let output_file_path = output_path.join(format!("mod_tree{}.txt", num));
             let mut file = File::create(&output_file_path).unwrap();
