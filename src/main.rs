@@ -35,9 +35,12 @@ fn main() {
         process::exit(1)
     });
     run_call_chain(&crate_path);
+
     let mut crate_context = CrateContext::new(&crate_path);
+
     crate_context.parse_crate();
     crate_context.change_all_names();
+
     let mut mod_trees: HashSet<String> = HashSet::new();
     crate_context.cout_all_mod_trees_in_on_file_for_test(&mut mod_trees);
     let mut mod_trees_vec: Vec<String> = Vec::new();
@@ -45,6 +48,7 @@ fn main() {
         mod_trees_vec.push(mod_tree.clone());
     }
     let mod_trees = mod_trees_vec;
+
     let mut fns: HashMap<String, FnData> = HashMap::new();
     let mut structs: HashMap<String, StructData> = HashMap::new();
     crate_context.get_result(&mut fns, &mut structs);
@@ -57,6 +61,7 @@ fn main() {
         .unwrap();
     file.write_all(format!("structs:\n{:#?}", structs).as_bytes())
         .unwrap();
+
     crate_context.parse_all_context(&mod_trees, &fns, &structs);
     crate_context.cout_in_one_file_for_test();
     crate_context.cout_complete_function_name_in_on_file_for_test();
