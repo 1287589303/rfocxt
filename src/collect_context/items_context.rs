@@ -1140,6 +1140,7 @@ pub struct StructItem {
     item: Option<ItemStruct>,
     // applications: Applications,
     visibility: MyVisibility,
+    relative_types: Vec<String>,
 }
 
 impl StructItem {
@@ -1149,6 +1150,7 @@ impl StructItem {
             item: None,
             // applications: Applications::new(),
             visibility: MyVisibility::Pri,
+            relative_types: Vec::new(),
         }
     }
 
@@ -1204,6 +1206,7 @@ pub struct EnumItem {
     item: Option<ItemEnum>,
     // applications: Applications,
     visibility: MyVisibility,
+    relative_types: Vec<String>,
 }
 
 impl EnumItem {
@@ -1213,6 +1216,7 @@ impl EnumItem {
             item: None,
             // applications: Applications::new(),
             visibility: MyVisibility::Pri,
+            relative_types: Vec::new(),
         }
     }
 
@@ -1268,6 +1272,7 @@ pub struct UnionItem {
     item: Option<ItemUnion>,
     // applications: Applications,
     visibility: MyVisibility,
+    relative_types: Vec<String>,
 }
 
 impl UnionItem {
@@ -1277,6 +1282,7 @@ impl UnionItem {
             item: None,
             // applications: Applications::new(),
             visibility: MyVisibility::Pri,
+            relative_types: Vec::new(),
         }
     }
 

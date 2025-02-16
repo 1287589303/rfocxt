@@ -14,7 +14,8 @@ use regex::Regex;
 use syn::{
     parse2,
     visit::{self, Visit},
-    Attribute, Expr, Item, Lit, Meta, Path, Stmt, Type, UseTree as SynUseTree, Visibility,
+    Attribute, Expr, Fields, FieldsNamed, Item, Lit, Meta, Path, Stmt, Type, UseTree as SynUseTree,
+    Visibility,
 };
 
 use super::{
@@ -99,6 +100,10 @@ fn parse_visibility(visibility: &Visibility) -> MyVisibility {
         }
         Visibility::Inherited => MyVisibility::Pri,
     }
+}
+
+fn parse_fields(ty: &Type, types: &mut Vec<String>) {
+    
 }
 
 fn add_new_calls_and_types(data: &mut CallsAndTypes, mod_trees: &Vec<String>) {
