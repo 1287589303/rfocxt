@@ -102,8 +102,10 @@ fn parse_visibility(visibility: &Visibility) -> MyVisibility {
 }
 
 fn add_new_calls_and_types(data: &mut CallsAndTypes, mod_trees: &Vec<String>) {
-    let re_impl = Regex::new(r"<impl\s+([^>]+)>").unwrap();
-    let re_as = Regex::new(r"<\s*([^>\s]+)\s+as\s+([^>\s]+)\s*>").unwrap();
+    let re_impl = Regex::new(r"<impl\s([^>]+)>").unwrap();
+    let re_as = Regex::new(r"<([^>\s]+)\sas\s([^>\s]+)>").unwrap();
+    let re_trait_bound = Regex::new(r"(::<[^>\s]+[,\s[^>\s]+]*>)").unwrap();
+    let re_struct = Regex::new(r"(<[^>\s]+[,\s[^>\s]+]*>)").unwrap();
     let mut new_calls: HashSet<String> = HashSet::new();
     let mut new_types: HashSet<String> = HashSet::new();
     for call in data.calls.iter() {
@@ -118,26 +120,49 @@ fn add_new_calls_and_types(data: &mut CallsAndTypes, mod_trees: &Vec<String>) {
             }
         }
         for caps in re_as.captures_iter(&call) {
-            let content = caps[1].to_string();
-            let path = MyPath::new(&content);
+            let content1 = caps[1].to_string();
+            let content2 = caps[2].to_string();
+
+            let new_call = call.replace(&content2, "");
+            new_calls.insert(new_call);
+            let path = MyPath::new(&content1);
             for mod_tree in mod_trees.iter() {
                 let mod_tree_path = MyPath::new(mod_tree);
                 let new_path = mod_tree_path.connect(&path).to_string();
-                let new_call = call.replace(&content, &new_path);
+                let new_call = call.replace(&content1, &new_path);
                 new_calls.insert(new_call.to_string());
-                let new_call = call.replace(&content, " ");
-                new_calls.insert(new_call.to_string());
+
+                let new_call = new_call.replace(&content2, "");
+                new_calls.insert(new_call);
             }
-            let content = caps[2].to_string();
-            let path = MyPath::new(&content);
+
+            let new_call = call.replace(&content1, " ");
+            new_calls.insert(new_call.to_string());
+
+            let path = MyPath::new(&content2);
             for mod_tree in mod_trees.iter() {
                 let mod_tree_path = MyPath::new(mod_tree);
                 let new_path = mod_tree_path.connect(&path).to_string();
-                let new_call = call.replace(&content, &new_path);
+                let new_call = call.replace(&content2, &new_path);
                 new_calls.insert(new_call.to_string());
+
+                let new_call = new_call.replace(&content1, " ");
+                new_calls.insert(new_call);
             }
         }
+        for caps in re_trait_bound.captures_iter(&call) {
+            let content = caps[1].to_string();
+            // println!("{}", content);
+            let new_call = call.replace(&content, &"");
+            new_calls.insert(new_call);
+        }
     }
+    for new_call in new_calls {
+        if !data.calls.contains(&new_call) {
+            data.calls.push(new_call);
+        }
+    }
+    new_calls = HashSet::new();
     for call in data.calls.iter() {
         for mod_tree in mod_trees.iter() {
             let mod_tree_path = MyPath::new(mod_tree);
@@ -146,6 +171,66 @@ fn add_new_calls_and_types(data: &mut CallsAndTypes, mod_trees: &Vec<String>) {
             new_calls.insert(new_call.to_string());
         }
     }
+    for a_type in data.types.iter() {
+        for caps in re_impl.captures_iter(&a_type) {
+            let content = caps[1].to_string();
+            let path = MyPath::new(&content);
+            for mod_tree in mod_trees.iter() {
+                let mod_tree_path = MyPath::new(mod_tree);
+                let new_path = mod_tree_path.connect(&path).to_string();
+                let new_type = a_type.replace(&content, &new_path);
+                new_types.insert(new_type.to_string());
+            }
+        }
+        for caps in re_as.captures_iter(&a_type) {
+            let content1 = caps[1].to_string();
+            let content2 = caps[2].to_string();
+
+            let new_type = a_type.replace(&content2, "");
+            new_types.insert(new_type);
+            let path = MyPath::new(&content1);
+            for mod_tree in mod_trees.iter() {
+                let mod_tree_path = MyPath::new(mod_tree);
+                let new_path = mod_tree_path.connect(&path).to_string();
+                let new_type = a_type.replace(&content1, &new_path);
+                new_types.insert(new_type.to_string());
+
+                let new_type = new_type.replace(&content2, "");
+                new_types.insert(new_type);
+            }
+
+            let new_type = a_type.replace(&content1, " ");
+            new_types.insert(new_type.to_string());
+
+            let path = MyPath::new(&content2);
+            for mod_tree in mod_trees.iter() {
+                let mod_tree_path = MyPath::new(mod_tree);
+                let new_path = mod_tree_path.connect(&path).to_string();
+                let new_type = a_type.replace(&content2, &new_path);
+                new_types.insert(new_type.to_string());
+
+                let new_type = new_type.replace(&content1, " ");
+                new_types.insert(new_type);
+            }
+        }
+        for caps in re_trait_bound.captures_iter(&a_type) {
+            let content = caps[1].to_string();
+            // println!("{}", content);
+            let new_type = a_type.replace(&content, &"");
+            new_types.insert(new_type);
+        }
+        for caps in re_struct.captures_iter(&a_type) {
+            let content = caps[1].to_string();
+            let new_type = a_type.replace(&content, "");
+            new_types.insert(new_type);
+        }
+    }
+    for new_type in new_types {
+        if !data.types.contains(&new_type) {
+            data.types.push(new_type);
+        }
+    }
+    new_types = HashSet::new();
     for a_type in data.types.iter() {
         for mod_tree in mod_trees.iter() {
             let mod_tree_path = MyPath::new(mod_tree);
@@ -795,25 +880,24 @@ impl SyntaxContext {
                                 trait_item.insert_type(&trait_type_item);
                             }
                             SynTraitItem::Fn(item_fn) => {
+                                let mut trait_fn_item = TraitFnItem::new();
+                                trait_fn_item.insert_fn_name(&item_fn.sig.ident.to_string());
+                                trait_fn_item
+                                    .insert_complete_name_in_file(&trait_item.get_trait_name_str());
+                                let mut modified_item_fn = item_fn.clone();
+                                modified_item_fn.attrs =
+                                    delete_doc_attributes(&modified_item_fn.attrs);
+                                trait_fn_item.insert_item(&modified_item_fn);
+                                let mut inside_items: Vec<Item> = Vec::new();
                                 if let Some(block) = &item_fn.default {
-                                    let mut trait_fn_item = TraitFnItem::new();
-                                    trait_fn_item.insert_fn_name(&item_fn.sig.ident.to_string());
-                                    trait_fn_item.insert_complete_name_in_file(
-                                        &trait_item.get_trait_name_str(),
-                                    );
-                                    let mut modified_item_fn = item_fn.clone();
-                                    modified_item_fn.attrs =
-                                        delete_doc_attributes(&modified_item_fn.attrs);
-                                    trait_fn_item.insert_item(&modified_item_fn);
-                                    let mut inside_items: Vec<Item> = Vec::new();
                                     for stmt in block.stmts.iter() {
                                         if let Stmt::Item(stmt_item) = stmt {
                                             inside_items.push(stmt_item.clone());
                                         }
                                     }
-                                    trait_fn_item.insert_items(&inside_items);
-                                    trait_item.insert_function(&trait_fn_item);
                                 }
+                                trait_fn_item.insert_items(&inside_items);
+                                trait_item.insert_function(&trait_fn_item);
                             }
                             _ => {}
                         }

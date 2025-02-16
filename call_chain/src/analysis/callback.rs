@@ -168,7 +168,7 @@ impl MirCheckerCallbacks {
             let mut calls: HashSet<String> = HashSet::new();
             let mut tys: HashSet<Ty<'tcx>> = HashSet::new();
             let mut types: HashSet<String> = HashSet::new();
-            for basic_block in basic_blocks {
+            for basic_block in basic_blocks.iter() {
                 if let TerminatorKind::Call {
                     func,
                     args,
@@ -201,7 +201,7 @@ impl MirCheckerCallbacks {
             // for call in calls.iter() {
             //     println!("{:#?}", call);
             // }
-            for local_decl in local_decls {
+            for local_decl in local_decls.iter() {
                 // let decl_type = local_decl.ty.peel_refs().to_string();
                 // println!("{:#?}", local_decl.ty.peel_refs().to_string());
                 // types.insert(decl_type);
@@ -215,31 +215,38 @@ impl MirCheckerCallbacks {
             //     println!("{:#?}", a_type);
             // }
             // println!();
-            let mut new_calls: HashSet<String> = HashSet::new();
-            for call in calls.iter() {
-                if call.chars().nth(call.len() - 1).unwrap() == '>' {
-                    let mut index = None;
-                    for (i, c) in call.chars().rev().enumerate() {
-                        if c == '<' {
-                            index = Some(call.len() - i - 3);
-                            break;
-                        }
-                    }
-                    if let Some(pos) = index {
-                        let sub_call = String::from(&call[..pos]);
-                        new_calls.insert(sub_call);
-                    }
-                }
-            }
-            for new_call in new_calls.iter() {
-                calls.insert(new_call.clone());
-            }
+            // let mut new_calls: HashSet<String> = HashSet::new();
+            // for call in calls.iter() {
+            //     if call.chars().nth(call.len() - 1).unwrap() == '>' {
+            //         let mut index = None;
+            //         for (i, c) in call.chars().rev().enumerate() {
+            //             if c == '<' {
+            //                 index = Some(call.len() - i - 3);
+            //                 break;
+            //             }
+            //         }
+            //         if let Some(pos) = index {
+            //             let sub_call = String::from(&call[..pos]);
+            //             new_calls.insert(sub_call);
+            //         }
+            //     }
+            // }
+            // for new_call in new_calls.iter() {
+            //     calls.insert(new_call.clone());
+            // }
             let calls_and_types = CallsAndTypes::new(&mod_info.name, &calls, &types);
             let directory_path = "./rfocxt/callsandtypes";
             create_dir_all(&directory_path).unwrap();
             let file_path = PathBuf::from(&directory_path).join(format!("{}.json", fn_name));
             let mut file = File::create(&file_path).unwrap();
             file.write_all(serde_json::to_string(&calls_and_types).unwrap().as_bytes())
+                .unwrap();
+
+            let directory_path = "./rfocxt/basic_blocks";
+            create_dir_all(&directory_path).unwrap();
+            let file_path = PathBuf::from(&directory_path).join(format!("{}.txt", fn_name));
+            let mut file = File::create(&file_path).unwrap();
+            file.write_all(format!("{:#?}\n{:#?}", basic_blocks, local_decls).as_bytes())
                 .unwrap();
         }
     }
