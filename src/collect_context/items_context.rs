@@ -121,7 +121,11 @@ impl MyPath {
                 directly_use_tree,
             );
         } else if self.name == "self" {
+            // println!("{}", self.to_string());
             *directly_use_tree = MyPath::new_with_copy(&mod_context.borrow().get_mod_tree());
+            if let None = self.next {
+                return false;
+            }
             return self.next.as_mut().unwrap().get_directly_use_tree(
                 direct_name,
                 original_path_string,
