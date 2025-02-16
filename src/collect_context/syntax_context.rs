@@ -1365,6 +1365,11 @@ impl SyntaxContext {
                         let mut data: CallsAndTypes = serde_json::from_str(&contents).unwrap();
                         let mut syntax_context = SyntaxContext::new();
                         data.calls.push(function_item.get_complete_name());
+                        data.types
+                            .push(impl_item.get_struct_name().get_import_name().to_string());
+                        if let Some(trait_name) = impl_item.get_trait_name() {
+                            data.types.push(trait_name.get_import_name().to_string());
+                        }
                         parse_callsandtypes(
                             &mut data,
                             mod_trees,
@@ -1404,6 +1409,7 @@ impl SyntaxContext {
                         let mut data: CallsAndTypes = serde_json::from_str(&contents).unwrap();
                         let mut syntax_context = SyntaxContext::new();
                         data.calls.push(function_item.get_complete_name());
+                        data.types.push(trait_item.get_name());
                         parse_callsandtypes(
                             &mut data,
                             mod_trees,
