@@ -235,6 +235,44 @@ impl MyPath {
             return 1 + self.next.as_ref().unwrap().get_depth();
         }
     }
+
+    pub fn is_parent(&self, another_path: &MyPath) -> bool {
+        if self.name == another_path.name {
+            if let None = self.next {
+                if let Some(_) = another_path.next {
+                    return true;
+                } else {
+                    return false;
+                }
+            } else {
+                if let None = another_path.next {
+                    return false;
+                } else {
+                    return self
+                        .next
+                        .as_ref()
+                        .unwrap()
+                        .is_parent(&another_path.next.as_ref().unwrap());
+                }
+            }
+        } else {
+            return false;
+        }
+    }
+
+    pub fn connect(&self, another_path: &MyPath) -> MyPath {
+        let mut another_path = another_path.clone();
+        let mut new_path = self.clone();
+        while let Some(path) = another_path.next {
+            new_path.down(&another_path.name);
+            let sub_path = *path.next.unwrap().clone();
+            another_path = sub_path;
+        }
+        if another_path.name != "" {
+            new_path.down(&another_path.name);
+        }
+        new_path
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -280,6 +318,10 @@ impl Name {
 
     pub fn get_name(&self) -> String {
         self.name.clone()
+    }
+
+    pub fn get_import_name(&self) -> MyPath {
+        self.import_name.clone()
     }
 
     pub fn get_import_name_depth(&self) -> i32 {
@@ -699,6 +741,10 @@ impl FnItem {
         self.fn_name.get_name()
     }
 
+    pub fn get_complete_name(&self) -> String {
+        self.fn_name.get_import_name().to_string()
+    }
+
     // pub fn get_complete_function_name_in_file(&self) -> String {
     //     return self.complete_function_name_in_file.clone();
     // }
@@ -847,6 +893,54 @@ impl ImplFnItem {
     pub fn insert_visibility(&mut self, visibility: MyVisibility) {
         self.visibility = visibility;
     }
+
+    pub fn change_name(
+        &mut self,
+        mod_context: &Rc<RefCell<ModContext>>,
+        struct_name: &Name,
+        trait_name: &Option<Name>,
+    ) {
+        if let None = trait_name {
+            let mod_path = mod_context.borrow().get_mod_tree();
+            let struct_path = struct_name.get_import_name();
+            let mut up_struct_path = struct_path.clone();
+            up_struct_path.up();
+            if mod_path == up_struct_path {
+                let mut fn_path = struct_path.clone();
+                fn_path.down(&self.fn_name.get_name());
+                let complete_name = fn_path.to_string();
+                self.fn_name.insert_complete_name(&complete_name);
+                self.fn_name.insert_import_name(&complete_name);
+            } else {
+                let mut fn_path = mod_path.clone();
+                let struct_path_string = struct_path.to_string();
+                fn_path.down(&format!("<impl {}>", struct_path_string));
+                fn_path.down(&self.fn_name.get_name());
+                let complete_name = fn_path.to_string();
+                self.fn_name.insert_complete_name(&complete_name);
+                self.fn_name.insert_import_name(&complete_name);
+            }
+        } else {
+            let struct_path = struct_name.get_import_name();
+            let trait_path = trait_name.as_ref().unwrap().get_import_name();
+            let fn_path_string = format!(
+                "<{} as {}>",
+                struct_path.to_string(),
+                trait_path.to_string()
+            ) + "::"
+                + &self.fn_name.get_name();
+            self.fn_name.insert_complete_name(&fn_path_string);
+            self.fn_name.insert_import_name(&fn_path_string);
+        }
+    }
+
+    pub fn get_name(&self) -> String {
+        self.fn_name.get_name()
+    }
+
+    pub fn get_complete_name(&self) -> String {
+        self.fn_name.get_import_name().to_string()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -926,6 +1020,10 @@ impl ImplItem {
         return self.impl_num;
     }
 
+    pub fn get_item(&self) -> &ItemImpl {
+        self.item.as_ref().unwrap()
+    }
+
     pub fn get_function_with_inside(&self) -> Vec<ImplFnItem> {
         let mut functions_with_inside: Vec<ImplFnItem> = Vec::new();
         for impl_fn_item in self.functions.iter() {
@@ -966,6 +1064,18 @@ impl ImplItem {
 
     pub fn get_trait_name(&self) -> &Option<Name> {
         &self.trait_name
+    }
+
+    pub fn change_function_name(&mut self, mod_context: &Rc<RefCell<ModContext>>) {
+        for function in self.functions.iter_mut() {
+            function.change_name(mod_context, &self.struct_name, &self.trait_name);
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.types.clear();
+        self.consts.clear();
+        self.functions.clear();
     }
 
     // pub fn insert_applications(&mut self, applications: &Vec<String>) {
@@ -1281,6 +1391,14 @@ impl TraitFnItem {
     pub fn get_item(&self) -> TraitItemFn {
         self.item.clone().unwrap()
     }
+
+    pub fn get_name(&self) -> String {
+        self.fn_name.get_name()
+    }
+
+    pub fn get_complete_name(&self) -> String {
+        self.fn_name.get_import_name().to_string()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1380,6 +1498,12 @@ impl TraitItem {
 
     pub fn get_name(&self) -> String {
         self.trait_name.get_name()
+    }
+
+    pub fn clear(&mut self) {
+        self.types.clear();
+        self.consts.clear();
+        self.functions.clear();
     }
 
     // pub fn insert_applications(&mut self, applications: &Vec<String>) {

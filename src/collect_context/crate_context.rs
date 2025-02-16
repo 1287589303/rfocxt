@@ -1,5 +1,6 @@
 use std::{
     cell::RefCell,
+    collections::HashMap,
     fs::{self, read_to_string, File},
     io::Write,
     path::PathBuf,
@@ -13,6 +14,7 @@ use toml::Value;
 use super::{
     items_context::MyVisibility,
     mod_context::{ModContext, ModInfo, ModModInfo},
+    result::{FnData, StructData},
 };
 
 #[derive(Debug, Clone)]
@@ -24,7 +26,7 @@ pub struct CrateContext {
 }
 
 impl CrateContext {
-    pub fn new(crate_path: PathBuf) -> Self {
+    pub fn new(crate_path: &PathBuf) -> Self {
         let mut crate_context = CrateContext {
             crate_name: String::new(),
             crate_path: PathBuf::new(),
@@ -102,7 +104,7 @@ impl CrateContext {
 
     fn change_impl_name(&mut self) {}
 
-    pub fn change_all_name(&mut self) {
+    pub fn change_all_names(&mut self) {
         for mod_context in self.main_mod_contexts.iter_mut() {
             mod_context
                 .borrow_mut()
@@ -116,13 +118,17 @@ impl CrateContext {
         }
     }
 
-    // pub fn parse_all_context(&self) {
-    //     let output_path = self.crate_path.join("rfocxt");
-    //     fs::create_dir_all(&output_path).unwrap();
-    //     for mod_context in self.main_mod_contexts.iter() {
-    //         mod_context.borrow().get_all_context(&output_path);
-    //     }
-    // }
+    pub fn parse_all_context(
+        &self,
+        fns: &HashMap<String, FnData>,
+        structs: &HashMap<String, StructData>,
+    ) {
+        for mod_context in self.main_mod_contexts.iter() {
+            mod_context
+                .borrow()
+                .get_all_context(&self.crate_path.join("focxt"));
+        }
+    }
 
     pub fn cout_in_one_file_for_test(&self) {
         let output_path = self.crate_path.join("rfocxt/context.txt");
@@ -131,13 +137,16 @@ impl CrateContext {
         file.write_all(format!("{:#?}", self).as_bytes()).unwrap();
     }
 
-    pub fn cout_all_mod_trees_in_on_file_for_test(&self) {
+    pub fn cout_all_mod_trees_in_on_file_for_test(&self, out_mod_trees: &mut Vec<String>) {
         let output_path = self.crate_path.join("rfocxt/mod_trees");
         fs::create_dir_all(&output_path).unwrap();
         let mut num = 0;
         for mod_context in self.main_mod_contexts.iter() {
             let mut mod_trees: Vec<String> = Vec::new();
             mod_context.borrow().get_all_mod_trees(&mut mod_trees);
+            for mod_tree in mod_trees {
+                out_mod_trees.push(mod_tree);
+            }
             let output_file_path = output_path.join(format!("mod_tree{}.txt", num));
             let mut file = File::create(&output_file_path).unwrap();
             file.write_all(format!("{:#?}", mod_trees).as_bytes())
@@ -161,6 +170,16 @@ impl CrateContext {
             file.write_all(format!("{:#?}", function_names).as_bytes())
                 .unwrap();
             num += 1;
+        }
+    }
+
+    pub fn get_result(
+        &self,
+        fns: &mut HashMap<String, FnData>,
+        structs: &mut HashMap<String, StructData>,
+    ) {
+        for main_mod_context in self.main_mod_contexts.iter() {
+            main_mod_context.borrow().get_result(fns, structs);
         }
     }
 }

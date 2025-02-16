@@ -5,12 +5,9 @@ use rustc_hir::intravisit::{self, Visitor};
 use rustc_hir::{self, BodyId, FnDecl};
 use rustc_middle::hir::map::Map;
 use rustc_middle::hir::nested_filter;
-use rustc_middle::mir::{BasicBlock, BasicBlockData, BasicBlocks, LocalDecl, LocalDecls};
+use rustc_middle::mir::{BasicBlockData, LocalDecl};
 use rustc_middle::ty::TyCtxt;
 use rustc_span::symbol::sym;
-use std::collections::{HashMap, HashSet};
-use std::fs::{self, File};
-use std::io::Write;
 use syn::parse_str;
 
 use super::exporter::ModInfo;

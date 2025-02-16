@@ -1,5 +1,5 @@
 use super::sourceinfo::SourceInfo;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Serialize)]
@@ -177,14 +177,15 @@ impl Cond {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CallsAndTypes {
+    pub mod_name: String,
     pub calls: Vec<String>,
     pub types: Vec<String>,
 }
 
 impl CallsAndTypes {
-    pub fn new(calls: &HashSet<String>, types: &HashSet<String>) -> Self {
+    pub fn new(mod_name: &String, calls: &HashSet<String>, types: &HashSet<String>) -> Self {
         let mut calls_vec: Vec<String> = Vec::new();
         for call in calls.iter() {
             calls_vec.push(call.clone());
@@ -194,6 +195,7 @@ impl CallsAndTypes {
             types_vec.push(a_type.clone());
         }
         CallsAndTypes {
+            mod_name: mod_name.clone(),
             calls: calls_vec,
             types: types_vec,
         }

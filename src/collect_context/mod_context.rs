@@ -1,5 +1,6 @@
 use std::{
     cell::RefCell,
+    collections::HashMap,
     fmt,
     fs::{self, read_to_string},
     path::PathBuf,
@@ -11,6 +12,7 @@ use syn::{parse_file, token::Else, Item};
 
 use super::{
     items_context::{MyPath, MyVisibility, Name, UseTree},
+    result::{FnData, StructData},
     syntax_context::SyntaxContext,
 };
 
@@ -546,6 +548,14 @@ impl ModContext {
         self.syntax_context.get_trait_name(name)
     }
 
+    pub fn get_result(
+        &self,
+        fns: &mut HashMap<String, FnData>,
+        structs: &mut HashMap<String, StructData>,
+    ) {
+        self.syntax_context.get_result(fns, structs);
+    }
+
     // pub fn get_all_item(&self, item_name: &String, syntax_context: &mut SyntaxContext) {
     //     let one_syntax_context = self.syntax_context.get_item(item_name);
     //     syntax_context.extend_with_other(&one_syntax_context);
@@ -564,16 +574,19 @@ impl ModContext {
     //     }
     // }
 
-    // pub fn get_all_context(&self, output_path: &PathBuf, main_mod_contexts: &Vec<ModContext>) {
-    //     self.syntax_context.get_context(
-    //         output_path,
-    //         &self.mod_info.get_mod_tree(),
-    //         main_mod_contexts,
-    //     );
-    //     for sub_mod in self.sub_mods.iter() {
-    //         sub_mod
-    //             .borrow()
-    //             .get_all_context(output_path, main_mod_contexts);
-    //     }
-    // }
+    pub fn get_all_context(
+        &self,
+        output_path: &PathBuf,
+        fns: &HashMap<String, FnData>,
+        structs: &HashMap<String, StructData>,
+    ) {
+        self.syntax_context.get_context(
+            output_path,
+            &self.mod_info.get_mod_tree(),
+            main_mod_contexts,
+        );
+        for sub_mod in self.sub_mods.iter() {
+            sub_mod.borrow().get_all_context(output_path);
+        }
+    }
 }

@@ -1,9 +1,20 @@
-use std::{fs, path::PathBuf, process};
+use std::{
+    collections::HashMap,
+    fs::{self, File},
+    io::Write,
+    path::PathBuf,
+    process,
+};
 
 use clap::Parser;
-use collect_context::crate_context::CrateContext;
+use collect_context::{
+    crate_context::CrateContext,
+    result::{FnData, StructData},
+};
+use utils::run_call_chain;
 
 mod collect_context;
+mod utils;
 
 #[derive(Parser)]
 #[command(name = "rust focxt")]
@@ -23,11 +34,25 @@ fn main() {
         eprintln!("The crate path {:?} doesn't exisit!", &input_crate_path);
         process::exit(1)
     });
-    let mut crate_context = CrateContext::new(crate_path);
+    run_call_chain(&crate_path);
+    let mut crate_context = CrateContext::new(&crate_path);
     crate_context.parse_crate();
-    crate_context.change_all_name();
-    // crate_context.parse_all_context();
+    crate_context.change_all_names();
+    let mut mod_trees: Vec<String> = Vec::new();
+    crate_context.cout_all_mod_trees_in_on_file_for_test(&mut mod_trees);
+    let mut fns: HashMap<String, FnData> = HashMap::new();
+    let mut structs: HashMap<String, StructData> = HashMap::new();
+    crate_context.get_result(&mut fns, &mut structs);
+    // println!("fns:\n{:#?}", fns);
+    // println!("structs:\n{:#?}", structs);
+    let output_path = crate_path.join("rfocxt/result.txt");
+    fs::create_dir_all(output_path.parent().unwrap()).unwrap();
+    let mut file = File::create(&output_path).unwrap();
+    file.write_all(format!("fns:\n{:#?}", fns).as_bytes())
+        .unwrap();
+    file.write_all(format!("structs:\n{:#?}", structs).as_bytes())
+        .unwrap();
+    crate_context.parse_all_context();
     crate_context.cout_in_one_file_for_test();
-    crate_context.cout_all_mod_trees_in_on_file_for_test();
     crate_context.cout_complete_function_name_in_on_file_for_test();
 }

@@ -1,11 +1,8 @@
-use regex::Regex;
 use rustc_driver::Compilation;
-use rustc_hir::def;
 use rustc_interface::interface;
 use rustc_interface::Queries;
 use rustc_middle::mir::Operand;
 use rustc_middle::mir::TerminatorKind;
-use rustc_middle::ty;
 use rustc_middle::ty::GenericArgKind;
 use rustc_middle::ty::Ty;
 use rustc_middle::ty::TyCtxt;
@@ -167,6 +164,7 @@ impl MirCheckerCallbacks {
                 basic_blocks,
                 local_decls,
             } = data;
+            // println!("{}", mod_info.name);
             let mut calls: HashSet<String> = HashSet::new();
             let mut tys: HashSet<Ty<'tcx>> = HashSet::new();
             let mut types: HashSet<String> = HashSet::new();
@@ -203,21 +201,40 @@ impl MirCheckerCallbacks {
             // for call in calls.iter() {
             //     println!("{:#?}", call);
             // }
-            // for local_decl in local_decls {
-            //     // let decl_type = local_decl.ty.peel_refs().to_string();
-            //     // println!("{:#?}", local_decl.ty.peel_refs().to_string());
-            //     // types.insert(decl_type);
-            //     collect_subtypes(local_decl.ty, tcx, &mut tys);
-            // }
-            // for ty in tys.iter() {
-            //     types.insert(ty.to_string());
-            // }
+            for local_decl in local_decls {
+                // let decl_type = local_decl.ty.peel_refs().to_string();
+                // println!("{:#?}", local_decl.ty.peel_refs().to_string());
+                // types.insert(decl_type);
+                collect_subtypes(local_decl.ty, tcx, &mut tys);
+            }
+            for ty in tys.iter() {
+                types.insert(ty.to_string());
+            }
             // println!("Types:");
             // for a_type in types.iter() {
             //     println!("{:#?}", a_type);
             // }
             // println!();
-            let calls_and_types = CallsAndTypes::new(&calls, &types);
+            let mut new_calls: HashSet<String> = HashSet::new();
+            for call in calls.iter() {
+                if call.chars().nth(call.len() - 1).unwrap() == '>' {
+                    let mut index = None;
+                    for (i, c) in call.chars().rev().enumerate() {
+                        if c == '<' {
+                            index = Some(call.len() - i - 3);
+                            break;
+                        }
+                    }
+                    if let Some(pos) = index {
+                        let sub_call = String::from(&call[..pos]);
+                        new_calls.insert(sub_call);
+                    }
+                }
+            }
+            for new_call in new_calls.iter() {
+                calls.insert(new_call.clone());
+            }
+            let calls_and_types = CallsAndTypes::new(&mod_info.name, &calls, &types);
             let directory_path = "./rfocxt/callsandtypes";
             create_dir_all(&directory_path).unwrap();
             let file_path = PathBuf::from(&directory_path).join(format!("{}.json", fn_name));
