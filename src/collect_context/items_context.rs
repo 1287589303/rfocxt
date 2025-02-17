@@ -1183,6 +1183,14 @@ impl StructItem {
         self.struct_name.get_name()
     }
 
+    pub fn insert_relative_types(&mut self, relative_types: Vec<String>) {
+        self.relative_types = relative_types;
+    }
+
+    pub fn get_relative_types(&self) -> Vec<String> {
+        self.relative_types.clone()
+    }
+
     // pub fn insert_applications(&mut self, applications: &Vec<String>) {
     //     self.applications.insert_applications(applications);
     // }
@@ -1249,6 +1257,14 @@ impl EnumItem {
         &self.enum_name
     }
 
+    pub fn insert_relative_types(&mut self, relative_types: Vec<String>) {
+        self.relative_types = relative_types;
+    }
+
+    pub fn get_relative_types(&self) -> Vec<String> {
+        self.relative_types.clone()
+    }
+
     // pub fn insert_applications(&mut self, applications: &Vec<String>) {
     //     self.applications.insert_applications(applications);
     // }
@@ -1313,6 +1329,14 @@ impl UnionItem {
 
     pub fn get_union_name(&self) -> &Name {
         &self.union_name
+    }
+
+    pub fn insert_relative_types(&mut self, relative_types: Vec<String>) {
+        self.relative_types = relative_types;
+    }
+
+    pub fn get_relative_types(&self) -> Vec<String> {
+        self.relative_types.clone()
     }
 
     // pub fn insert_applications(&mut self, applications: &Vec<String>) {

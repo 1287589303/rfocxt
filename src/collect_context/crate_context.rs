@@ -130,6 +130,7 @@ impl CrateContext {
                 mod_trees,
                 fns,
                 structs,
+                self,
             );
         }
     }
@@ -184,6 +185,14 @@ impl CrateContext {
     ) {
         for main_mod_context in self.main_mod_contexts.iter() {
             main_mod_context.borrow().get_result(fns, structs);
+        }
+    }
+
+    pub fn get_relative_types_for_struct(&self, name: &String, relative_types: &mut Vec<String>) {
+        for sub_mod in self.main_mod_contexts.iter() {
+            sub_mod
+                .borrow()
+                .get_relative_types_for_struct(name, relative_types);
         }
     }
 }

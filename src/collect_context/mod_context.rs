@@ -11,6 +11,7 @@ use std::{
 use syn::{parse_file, token::Else, Item};
 
 use super::{
+    crate_context::{self, CrateContext},
     items_context::{MyPath, MyVisibility, Name, UseTree},
     result::{FnData, StructData},
     syntax_context::SyntaxContext,
@@ -559,6 +560,11 @@ impl ModContext {
         }
     }
 
+    pub fn get_relative_types_for_struct(&self, name: &String, relative_types: &mut Vec<String>) {
+        self.syntax_context
+            .get_relative_types_for_struct(name, relative_types);
+    }
+
     // pub fn get_all_item(&self, item_name: &String, syntax_context: &mut SyntaxContext) {
     //     let one_syntax_context = self.syntax_context.get_item(item_name);
     //     syntax_context.extend_with_other(&one_syntax_context);
@@ -583,6 +589,7 @@ impl ModContext {
         mod_trees: &Vec<String>,
         fns: &HashMap<String, FnData>,
         structs: &HashMap<String, StructData>,
+        crate_context: &CrateContext,
     ) {
         self.syntax_context.get_context(
             output_path,
@@ -590,11 +597,12 @@ impl ModContext {
             mod_trees,
             fns,
             structs,
+            crate_context,
         );
         for sub_mod in self.sub_mods.iter() {
             sub_mod
                 .borrow()
-                .get_all_context(output_path, mod_trees, fns, structs);
+                .get_all_context(output_path, mod_trees, fns, structs, crate_context);
         }
     }
 }

@@ -19,6 +19,7 @@ use syn::{
 };
 
 use super::{
+    crate_context::CrateContext,
     items_context::{
         ConstItem, EnumItem, FnItem, FunctionItem, ImplConstItem, ImplFnItem, ImplItem,
         ImplTypeItem, ModItem, MyPath, MyVisibility, Name, StaticItem, StructItem, TraitAliasItem,
@@ -102,8 +103,55 @@ fn parse_visibility(visibility: &Visibility) -> MyVisibility {
     }
 }
 
-fn parse_fields(ty: &Type, types: &mut Vec<String>) {
-    
+struct PathVisitor {
+    paths: Vec<String>,
+}
+
+impl PathVisitor {
+    fn new() -> Self {
+        PathVisitor { paths: Vec::new() }
+    }
+}
+
+impl<'ast> Visit<'ast> for PathVisitor {
+    fn visit_path(&mut self, node: &'ast Path) {
+        self.paths.extend(
+            node.segments
+                .iter()
+                .map(|segment| segment.ident.to_string()),
+        );
+        visit::visit_path(self, node);
+    }
+}
+
+fn visit_fields(fields: &Fields, applications: &mut Vec<String>) {
+    let mut visitor = PathVisitor::new();
+    match fields {
+        Fields::Named(field_named) => {
+            for field in field_named.named.iter() {
+                visitor.visit_type(&field.ty);
+            }
+        }
+        Fields::Unnamed(field_unnamed) => {
+            for field in field_unnamed.unnamed.iter() {
+                visitor.visit_type(&field.ty);
+            }
+        }
+        _ => {}
+    }
+    applications.extend(visitor.paths);
+    applications.sort();
+    applications.dedup();
+}
+
+fn visit_fields_named(fields_named: &FieldsNamed, applications: &mut Vec<String>) {
+    let mut visitor = PathVisitor::new();
+    for field in fields_named.named.iter() {
+        visitor.visit_type(&field.ty);
+    }
+    applications.extend(visitor.paths);
+    applications.sort();
+    applications.dedup();
 }
 
 fn add_new_calls_and_types(data: &mut CallsAndTypes, mod_trees: &Vec<String>) {
@@ -304,6 +352,7 @@ fn get_syntax(
                                     syntax_context.unions.push(union_item.clone());
                                 }
                             }
+                            _ => {}
                         }
                     }
                     // let trait_item_name = impl_item.get_trait_name();
@@ -372,6 +421,19 @@ fn get_syntax(
                 StructType::Union(union_item) => {
                     if !syntax_context.unions.contains(&union_item) {
                         syntax_context.unions.push(union_item.clone());
+                    }
+                }
+                StructType::Trait(trait_item) => {
+                    let mut has_trait = false;
+                    for has_trait_item in syntax_context.traits.iter() {
+                        if has_trait_item.get_item().eq(&trait_item.get_item()) {
+                            has_trait = true;
+                            break;
+                        }
+                    }
+                    if !has_trait {
+                        let mut trait_item = trait_item.clone();
+                        syntax_context.traits.push(trait_item);
                     }
                 }
             }
@@ -739,6 +801,9 @@ impl SyntaxContext {
                     modified_item_struct.attrs = delete_doc_attributes(&modified_item_struct.attrs);
                     struct_item.insert_item(&modified_item_struct);
                     struct_item.insert_visibility(parse_visibility(&item_struct.vis));
+                    let mut relative_types: Vec<String> = Vec::new();
+                    visit_fields(&modified_item_struct.fields, &mut relative_types);
+                    struct_item.insert_relative_types(relative_types);
                     syntax_context.structs.push(struct_item);
                 }
                 Item::Enum(item_enum) => {
@@ -748,6 +813,11 @@ impl SyntaxContext {
                     modified_item_enum.attrs = delete_doc_attributes(&modified_item_enum.attrs);
                     enum_item.insert_item(&modified_item_enum);
                     enum_item.insert_visibility(parse_visibility(&item_enum.vis));
+                    let mut relative_types: Vec<String> = Vec::new();
+                    for variant in modified_item_enum.variants.iter() {
+                        visit_fields(&variant.fields, &mut relative_types);
+                    }
+                    enum_item.insert_relative_types(relative_types);
                     syntax_context.enums.push(enum_item);
                 }
                 Item::Union(item_union) => {
@@ -757,6 +827,9 @@ impl SyntaxContext {
                     modified_item_union.attrs = delete_doc_attributes(&modified_item_union.attrs);
                     union_item.insert_item(&modified_item_union);
                     union_item.insert_visibility(parse_visibility(&item_union.vis));
+                    let mut relative_types: Vec<String> = Vec::new();
+                    visit_fields_named(&modified_item_union.fields, &mut relative_types);
+                    union_item.insert_relative_types(relative_types);
                     syntax_context.unions.push(union_item);
                 }
                 Item::Impl(item_impl) => {
@@ -1170,6 +1243,12 @@ impl SyntaxContext {
                 };
                 fns.insert(fn_data.complete_fn_name.clone(), fn_data);
             }
+            let struct_data = StructData {
+                struct_name: trait_item.get_name(),
+                complete_struct_name: trait_item.get_trait_name().get_import_name().to_string(),
+                struct_type: StructType::Trait(empty_trait_item),
+            };
+            structs.insert(struct_data.complete_struct_name.clone(), struct_data);
         }
         for struct_item in self.structs.iter() {
             let struct_data = StructData {
@@ -1194,6 +1273,24 @@ impl SyntaxContext {
                 struct_type: StructType::Union(union_item.clone()),
             };
             structs.insert(union_data.complete_struct_name.clone(), union_data);
+        }
+    }
+
+    pub fn get_relative_types_for_struct(&self, name: &String, relative_types: &mut Vec<String>) {
+        for struct_item in self.structs.iter() {
+            if struct_item.get_name().eq(name) {
+                *relative_types = struct_item.get_relative_types();
+            }
+        }
+        for enum_item in self.enums.iter() {
+            if enum_item.get_name().eq(name) {
+                *relative_types = enum_item.get_relative_types();
+            }
+        }
+        for union_item in self.unions.iter() {
+            if union_item.get_name().eq(name) {
+                *relative_types = union_item.get_relative_types();
+            }
         }
     }
 
@@ -1406,6 +1503,7 @@ impl SyntaxContext {
         mod_trees: &Vec<String>,
         fns: &HashMap<String, FnData>,
         structs: &HashMap<String, StructData>,
+        crate_context: &CrateContext,
     ) {
         for function_item in self.functions.iter() {
             let complete_function_name =
@@ -1456,6 +1554,14 @@ impl SyntaxContext {
                         data.calls.push(function_item.get_complete_name());
                         data.types
                             .push(impl_item.get_struct_name().get_import_name().to_string());
+                        let mut relative_types: Vec<String> = Vec::new();
+                        crate_context.get_relative_types_for_struct(
+                            &impl_item.get_struct_name().get_import_name().to_string(),
+                            &mut relative_types,
+                        );
+                        for relative_type in relative_types {
+                            data.types.push(relative_type);
+                        }
                         if let Some(trait_name) = impl_item.get_trait_name() {
                             data.types.push(trait_name.get_import_name().to_string());
                         }
