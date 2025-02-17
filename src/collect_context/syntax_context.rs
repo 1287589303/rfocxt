@@ -4,6 +4,7 @@ use std::{
     fs::{create_dir_all, File},
     io::{Read, Write},
     path::PathBuf,
+    process::exit,
     rc::Rc,
 };
 
@@ -14,8 +15,8 @@ use regex::Regex;
 use syn::{
     parse2,
     visit::{self, Visit},
-    Attribute, Expr, Fields, FieldsNamed, Item, Lit, Meta, Path, Stmt, Type, UseTree as SynUseTree,
-    Visibility,
+    Attribute, Expr, Fields, FieldsNamed, GenericParam, Generics, Item, Lit, Meta, Path, Stmt,
+    Type, TypeParamBound, UseTree as SynUseTree, Visibility,
 };
 
 use super::{
@@ -122,6 +123,28 @@ impl<'ast> Visit<'ast> for PathVisitor {
         );
         visit::visit_path(self, node);
     }
+}
+
+fn visit_generics(generics: &Generics, applications: &mut Vec<String>) {
+    let mut visitor = PathVisitor::new();
+    for genericparam in generics.params.iter() {
+        match genericparam {
+            GenericParam::Type(type_param) => {
+                for bound in type_param.bounds.iter() {
+                    match bound {
+                        TypeParamBound::Trait(trait_bound) => {
+                            visitor.visit_path(&trait_bound.path);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    applications.extend(visitor.paths);
+    applications.sort();
+    applications.dedup();
 }
 
 fn visit_fields(fields: &Fields, applications: &mut Vec<String>) {
@@ -406,10 +429,19 @@ fn get_syntax(
     }
     for a_type in data.types.iter() {
         let type_data = structs.get(a_type);
+        // if a_type.eq("hashbrown::control::bitmask::BitMask") {
+        //     println!("1");
+        // }
         if let Some(type_data) = type_data {
             match &type_data.struct_type {
                 StructType::Struct(struct_item) => {
+                    // if a_type.eq("hashbrown::control::bitmask::BitMask") {
+                    //     println!("1");
+                    // }
                     if !syntax_context.structs.contains(&struct_item) {
+                        // if a_type.eq("hashbrown::control::bitmask::BitMask") {
+                        //     println!("1");
+                        // }
                         syntax_context.structs.push(struct_item.clone());
                     }
                 }
@@ -444,12 +476,12 @@ fn get_syntax(
 fn parse_callsandtypes(
     data: &mut CallsAndTypes,
     mod_trees: &Vec<String>,
-    syntax: &mut SyntaxContext,
+    syntax_context: &mut SyntaxContext,
     fns: &HashMap<String, FnData>,
     structs: &HashMap<String, StructData>,
 ) {
     add_new_calls_and_types(data, mod_trees);
-    get_syntax(data, syntax, fns, structs);
+    get_syntax(data, syntax_context, fns, structs);
 }
 
 // struct PathVisitor {
@@ -1278,18 +1310,36 @@ impl SyntaxContext {
 
     pub fn get_relative_types_for_struct(&self, name: &String, relative_types: &mut Vec<String>) {
         for struct_item in self.structs.iter() {
-            if struct_item.get_name().eq(name) {
+            if struct_item
+                .get_struct_name()
+                .get_import_name()
+                .to_string()
+                .eq(name)
+            {
                 *relative_types = struct_item.get_relative_types();
+                return;
             }
         }
         for enum_item in self.enums.iter() {
-            if enum_item.get_name().eq(name) {
+            if enum_item
+                .get_enum_name()
+                .get_import_name()
+                .to_string()
+                .eq(name)
+            {
                 *relative_types = enum_item.get_relative_types();
+                return;
             }
         }
         for union_item in self.unions.iter() {
-            if union_item.get_name().eq(name) {
+            if union_item
+                .get_union_name()
+                .get_import_name()
+                .to_string()
+                .eq(name)
+            {
                 *relative_types = union_item.get_relative_types();
+                return;
             }
         }
     }
@@ -1559,12 +1609,19 @@ impl SyntaxContext {
                             &impl_item.get_struct_name().get_import_name().to_string(),
                             &mut relative_types,
                         );
-                        for relative_type in relative_types {
-                            data.types.push(relative_type);
+                        for relative_type in relative_types.iter() {
+                            data.types.push(relative_type.clone());
                         }
                         if let Some(trait_name) = impl_item.get_trait_name() {
                             data.types.push(trait_name.get_import_name().to_string());
                         }
+                        // println!("{}", complete_function_name);
+                        // println!(
+                        //     "{}",
+                        //     impl_item.get_struct_name().get_import_name().to_string()
+                        // );
+                        // println!("{:#?}", relative_types);
+                        // exit(1);
                         parse_callsandtypes(
                             &mut data,
                             mod_trees,
@@ -1585,6 +1642,7 @@ impl SyntaxContext {
                         let mut file = File::create(&file_path).unwrap();
                         file.write_all(serde_json::to_string(&data).unwrap().as_bytes())
                             .unwrap();
+                        // exit(1);
                     }
                     Err(_) => {}
                 }

@@ -563,6 +563,11 @@ impl ModContext {
     pub fn get_relative_types_for_struct(&self, name: &String, relative_types: &mut Vec<String>) {
         self.syntax_context
             .get_relative_types_for_struct(name, relative_types);
+        for sub_mod in self.sub_mods.iter() {
+            sub_mod
+                .borrow()
+                .get_relative_types_for_struct(name, relative_types);
+        }
     }
 
     // pub fn get_all_item(&self, item_name: &String, syntax_context: &mut SyntaxContext) {

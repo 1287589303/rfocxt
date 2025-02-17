@@ -189,8 +189,8 @@ impl CrateContext {
     }
 
     pub fn get_relative_types_for_struct(&self, name: &String, relative_types: &mut Vec<String>) {
-        for sub_mod in self.main_mod_contexts.iter() {
-            sub_mod
+        for main_mod_context in self.main_mod_contexts.iter() {
+            main_mod_context
                 .borrow()
                 .get_relative_types_for_struct(name, relative_types);
         }
